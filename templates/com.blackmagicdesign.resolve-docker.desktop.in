@@ -1,0 +1,13 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=DaVinci Resolve (Docker)
+GenericName=DaVinci Resolve
+Comment=Launch DaVinci Resolve through the Docker-backed Fedora container
+Path=/opt/resolve/
+Exec=@LAUNCHER@ %u
+Terminal=false
+MimeType=application/x-resolveproj;
+Icon=/opt/resolve/graphics/DV_Resolve.png
+StartupNotify=true
+Categories=AudioVideo;Video;AudioVideoEditing;
