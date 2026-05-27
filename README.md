@@ -8,7 +8,18 @@ It uses a Docker-backed Fedora 39 Distrobox so Resolve gets Fedora userspace lib
 
 - Kubuntu/Ubuntu 24.04 on Xorg/X11.
 - Host AMD ROCm/OpenCL already working. `clinfo` on the host should show an AMD platform and your GPU.
-- Docker and Distrobox installed, with your user able to run Docker:
+- Docker and Distrobox installed, with your user able to run Docker.
+
+  Use one Docker package family. If you already have Docker CE from
+  `download.docker.com` (`docker-ce`, `docker-ce-cli`, `containerd.io`), keep it
+  and install only the remaining host tools:
+
+```bash
+sudo apt install distrobox clinfo curl unzip
+sudo usermod -aG docker "$USER"
+```
+
+  If you do not already have Docker installed, Ubuntu's packaged Docker is fine:
 
 ```bash
 sudo apt install docker.io distrobox clinfo curl unzip
