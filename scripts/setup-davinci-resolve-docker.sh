@@ -58,7 +58,7 @@ packages=(
 )
 
 log() {
-  printf '[resolve-setup] %s\n' "$*"
+  printf '[resolve-setup] %s\n' "$*" >&2
 }
 
 die() {
@@ -123,7 +123,7 @@ download_resolve_zip() {
       log "verifying bundled Resolve archive checksum"
       (
         cd "${repo_dir}/vendor/blackmagic"
-        sha256sum -c SHA256SUMS --ignore-missing
+        sha256sum -c SHA256SUMS --ignore-missing >&2
       )
     fi
     log "using bundled Resolve archive: ${bundled_zip}"
