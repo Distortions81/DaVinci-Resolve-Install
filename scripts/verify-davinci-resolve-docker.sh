@@ -54,15 +54,49 @@ docker exec -u "${container_user}" \
   printf "XDG_CONFIG_HOME=%s\n" "$XDG_CONFIG_HOME"
   printf "XDG_DATA_HOME=%s\n" "$XDG_DATA_HOME"
   printf "XDG_CACHE_HOME=%s\n" "$XDG_CACHE_HOME"
-  ls -ln /dev/kfd /dev/dri/renderD128
+  if ls /dev/dri/renderD* >/dev/null 2>&1; then
+    ls -ln /dev/kfd /dev/dri/renderD*
+  else
+    ls -ln /dev/kfd /dev/dri 2>/dev/null || true
+  fi
   test -r /dev/kfd && echo "kfd: readable" || echo "kfd: not readable"
-  test -r /dev/dri/renderD128 && echo "renderD128: readable" || echo "renderD128: not readable"
+  readable_render_node=0
+  for node in /dev/dri/renderD*; do
+    [ -e "${node}" ] || continue
+    if [ -r "${node}" ]; then
+      readable_render_node=1
+      echo "$(basename "${node}"): readable"
+    else
+      echo "$(basename "${node}"): not readable"
+    fi
+  done
+  [ "${readable_render_node}" -eq 1 ] || echo "render node: no readable /dev/dri/renderD* node found"
 '
 
 echo
 echo "OpenCL:"
 docker exec -u "${container_user}" "${container}" bash -lc '
-  clinfo | grep -E "Number of platforms|Platform Name|Number of devices|Device Name|Board Name|Driver Version" | sed -n "1,40p"
+  clinfo_output="$(clinfo 2>&1)" || {
+    printf "%s\n" "${clinfo_output}"
+    exit 1
+  }
+  printf "%s\n" "${clinfo_output}" | grep -E "Number of platforms|Platform Name|Number of devices|Device Name|Board Name|Device Vendor|Device Type|Driver Version" | sed -n "1,60p" || true
+  printf "%s\n" "${clinfo_output}" | awk '"'"'
+    function flush_device() {
+      if (device_vendor_amd && device_gpu) {
+        found = 1
+      }
+      device_vendor_amd = 0
+      device_gpu = 0
+    }
+    /^[[:space:]]*Device Name/ { flush_device() }
+    /Device Vendor/ && ($0 ~ /AMD|Advanced Micro Devices/) { device_vendor_amd = 1 }
+    /Device Type/ && ($0 ~ /GPU/) { device_gpu = 1 }
+    END { flush_device(); exit !found }
+  '"'"' || {
+    echo "OpenCL check failed: no AMD GPU device was reported."
+    exit 1
+  }
 '
 
 echo

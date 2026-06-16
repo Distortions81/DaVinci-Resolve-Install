@@ -14,9 +14,15 @@ patch_resolve_libs="${PATCH_RESOLVE_LIBS:-1}"
 download_resolve="${DOWNLOAD_RESOLVE:-auto}"
 overwrite_resolve="${OVERWRITE_RESOLVE:-0}"
 launch_after_setup="${LAUNCH_AFTER_SETUP:-0}"
+allow_unsupported_resolve="${ALLOW_UNSUPPORTED_RESOLVE:-0}"
 
-resolve_version="${RESOLVE_VERSION:-20.3.3}"
-resolve_build="${RESOLVE_BUILD:-10}"
+supported_resolve_version="20.3.3"
+supported_resolve_build="10"
+supported_resolve_edition="Studio"
+supported_image="fedora:39"
+
+resolve_version="${RESOLVE_VERSION:-${supported_resolve_version}}"
+resolve_build="${RESOLVE_BUILD:-${supported_resolve_build}}"
 resolve_edition="${RESOLVE_EDITION:-Studio}"
 resolve_product_name="DaVinci Resolve Studio"
 resolve_zip_name="DaVinci_Resolve_Studio_${resolve_version}_Linux.zip"
@@ -90,6 +96,123 @@ run_root() {
 
 group_gid() {
   getent group "$1" | awk -F: '{ print $3 }'
+}
+
+resolve_marker_path() {
+  printf '%s/.davinci-resolve-docker-target\n' "${resolve_dir}"
+}
+
+is_truthy() {
+  case "$1" in
+    1|yes|true) return 0 ;;
+    0|no|false) return 1 ;;
+    *) die "invalid boolean value: $1" ;;
+  esac
+}
+
+validate_supported_target() {
+  if [ "${resolve_edition}" != "${supported_resolve_edition}" ]; then
+    die "this setup currently supports DaVinci Resolve Studio archives only; got RESOLVE_EDITION=${resolve_edition}"
+  fi
+
+  local unsupported=0
+  if [ "${resolve_version}" != "${supported_resolve_version}" ] || [ "${resolve_build}" != "${supported_resolve_build}" ]; then
+    unsupported=1
+  fi
+
+  if [ "${unsupported}" -eq 1 ]; then
+    if is_truthy "${allow_unsupported_resolve}"; then
+      log "warning: this repo is validated for ${resolve_product_name} ${supported_resolve_version} build ${supported_resolve_build}; using ${resolve_version} build ${resolve_build}"
+      if [ -z "${RESOLVE_ZIP:-}" ] && [ -z "${RESOLVE_DOWNLOAD_URL:-}" ] && [ -z "${RESOLVE_DOWNLOAD_ID:-}" ]; then
+        log "warning: the built-in Blackmagic download ID is for ${supported_resolve_version}; set RESOLVE_ZIP, RESOLVE_DOWNLOAD_URL, or RESOLVE_DOWNLOAD_ID for other versions"
+      fi
+    else
+      die "this repo is validated for ${resolve_product_name} ${supported_resolve_version} build ${supported_resolve_build}. Set ALLOW_UNSUPPORTED_RESOLVE=1 to experiment with ${resolve_version} build ${resolve_build}."
+    fi
+  fi
+
+  if [ "${image}" != "${supported_image}" ]; then
+    log "warning: default compatibility target uses ${supported_image}; RESOLVE_IMAGE=${image} is unvalidated"
+  fi
+}
+
+check_host_session() {
+  if [ -n "${XDG_SESSION_TYPE:-}" ] && [ "${XDG_SESSION_TYPE}" != "x11" ]; then
+    log "warning: XDG_SESSION_TYPE=${XDG_SESSION_TYPE}; this setup is validated on Xorg/X11"
+  fi
+}
+
+check_host_amd_opencl() {
+  log "checking host AMD OpenCL visibility"
+
+  local output
+  if ! output="$(clinfo 2>&1)"; then
+    printf '%s\n' "${output}" >&2
+    die "host clinfo failed. Install and fix AMD ROCm/OpenCL on the host before creating the container."
+  fi
+
+  if ! printf '%s\n' "${output}" | awk '
+    function flush_device() {
+      if (device_vendor_amd && device_gpu) {
+        found = 1
+      }
+      device_vendor_amd = 0
+      device_gpu = 0
+    }
+    /^[[:space:]]*Device Name/ { flush_device() }
+    /Device Vendor/ && ($0 ~ /AMD|Advanced Micro Devices/) { device_vendor_amd = 1 }
+    /Device Type/ && ($0 ~ /GPU/) { device_gpu = 1 }
+    END { flush_device(); exit !found }
+  '; then
+    printf '%s\n' "${output}" | grep -E 'Number of platforms|Platform Name|Number of devices|Device Name|Board Name|Device Vendor|Device Type|Driver Version' | sed -n '1,80p' >&2 || true
+    die "host clinfo does not show an AMD OpenCL GPU. Fix the host ROCm/OpenCL stack first."
+  fi
+
+  printf '%s\n' "${output}" | grep -E 'Platform Name|Device Name|Board Name|Device Vendor|Device Type|Driver Version' | sed -n '1,16p' >&2 || true
+}
+
+write_resolve_install_marker() {
+  local marker
+  marker="$(resolve_marker_path)"
+
+  if [ -w "${resolve_dir}" ]; then
+    {
+      printf 'installed_by=davinci-resolve-docker\n'
+      printf 'resolve_product=%s\n' "${resolve_product_name}"
+      printf 'resolve_version=%s\n' "${resolve_version}"
+      printf 'resolve_build=%s\n' "${resolve_build}"
+      printf 'container_image=%s\n' "${image}"
+    } > "${marker}"
+  else
+    {
+      printf 'installed_by=davinci-resolve-docker\n'
+      printf 'resolve_product=%s\n' "${resolve_product_name}"
+      printf 'resolve_version=%s\n' "${resolve_version}"
+      printf 'resolve_build=%s\n' "${resolve_build}"
+      printf 'container_image=%s\n' "${image}"
+    } | run_root tee "${marker}" >/dev/null
+    run_root chown "$(id -u):$(id -g)" "${marker}" || true
+  fi
+}
+
+check_existing_resolve_marker() {
+  local marker
+  marker="$(resolve_marker_path)"
+
+  if [ ! -f "${marker}" ]; then
+    log "warning: existing Resolve install has no ${marker}; assuming it is ${resolve_product_name} ${resolve_version} build ${resolve_build}"
+    return 0
+  fi
+
+  if grep -qx "resolve_version=${resolve_version}" "${marker}" && grep -qx "resolve_build=${resolve_build}" "${marker}"; then
+    return 0
+  fi
+
+  if is_truthy "${allow_unsupported_resolve}"; then
+    log "warning: existing Resolve marker does not match ${resolve_version} build ${resolve_build}: ${marker}"
+  else
+    die "existing Resolve marker does not match ${resolve_version} build ${resolve_build}: ${marker}. Use a matching RESOLVE_DIR or set ALLOW_UNSUPPORTED_RESOLVE=1 to experiment."
+  fi
 }
 
 get_blackmagic_download_url() {
@@ -176,6 +299,7 @@ install_resolve_tree() {
   fi
 
   [ -x "${resolve_dir}/bin/resolve" ] || die "Resolve install did not produce ${resolve_dir}/bin/resolve"
+  write_resolve_install_marker
 }
 
 extract_and_install_resolve() {
@@ -206,6 +330,7 @@ extract_and_install_resolve() {
 
 ensure_resolve_installed() {
   if [ -x "${resolve_dir}/bin/resolve" ]; then
+    check_existing_resolve_marker
     log "Resolve already installed at ${resolve_dir}"
     return 0
   fi
@@ -386,26 +511,55 @@ verify_container() {
   docker exec -u "${container_user}" "${container}" bash -lc '
     set -e
     test -r /dev/kfd
-    test -r /dev/dri/renderD128
+    readable_render_node=0
+    for node in /dev/dri/renderD*; do
+      [ -e "${node}" ] || continue
+      if [ -r "${node}" ]; then
+        readable_render_node=1
+        break
+      fi
+    done
+    [ "${readable_render_node}" -eq 1 ] || {
+      echo "no readable /dev/dri/renderD* node found" >&2
+      ls -ln /dev/dri 2>/dev/null || true
+      exit 1
+    }
     if ldd /opt/resolve/bin/resolve 2>&1 | grep -q "not found"; then
       ldd /opt/resolve/bin/resolve 2>&1 | grep "not found"
       exit 1
     fi
-    clinfo | grep -q "Number of devices[[:space:]]*1"
-    clinfo | grep -E "Platform Name|Device Name|Board Name|Driver Version" | sed -n "1,24p"
+    clinfo_output="$(clinfo)"
+    printf "%s\n" "${clinfo_output}" | awk '"'"'
+      function flush_device() {
+        if (device_vendor_amd && device_gpu) {
+          found = 1
+        }
+        device_vendor_amd = 0
+        device_gpu = 0
+      }
+      /^[[:space:]]*Device Name/ { flush_device() }
+      /Device Vendor/ && ($0 ~ /AMD|Advanced Micro Devices/) { device_vendor_amd = 1 }
+      /Device Type/ && ($0 ~ /GPU/) { device_gpu = 1 }
+      END { flush_device(); exit !found }
+    '"'"'
+    printf "%s\n" "${clinfo_output}" | grep -E "Platform Name|Device Name|Board Name|Device Vendor|Device Type|Driver Version" | sed -n "1,32p"
   '
 }
 
+validate_supported_target
+check_host_session
 need_cmd docker
 need_cmd distrobox
 need_cmd getent
 need_cmd ldconfig
+need_cmd clinfo
 
 [ -e /dev/kfd ] || die "/dev/kfd is missing. ROCm/HSA is not available on this host."
 [ -d /dev/dri ] || die "/dev/dri is missing."
 
 docker info >/dev/null 2>&1 || die "Docker is not usable by this user. Install Docker and add the user to the docker group, then log out/in."
 
+check_host_amd_opencl
 ensure_resolve_installed
 
 host_opencl="$(resolve_amd_opencl_lib)"
