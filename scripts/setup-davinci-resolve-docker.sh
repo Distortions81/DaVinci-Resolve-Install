@@ -8,6 +8,7 @@ container="${RESOLVE_CONTAINER:-davincibox-docker}"
 image="${RESOLVE_IMAGE:-fedora:39}"
 resolve_dir="${RESOLVE_DIR:-/opt/resolve}"
 container_user="${RESOLVE_USER:-$(id -un)}"
+resolve_home="${RESOLVE_HOME:-${HOME}/.local/share/davinci-resolve-box-home}"
 install_launcher="${INSTALL_LAUNCHER:-1}"
 patch_resolve_libs="${PATCH_RESOLVE_LIBS:-1}"
 download_resolve="${DOWNLOAD_RESOLVE:-auto}"
@@ -48,6 +49,7 @@ packages=(
   numactl-libs
   ocl-icd
   pulseaudio-libs
+  sqlite
   vulkan-loader
   xcb-util
   xcb-util-cursor
@@ -424,6 +426,7 @@ Resolve Docker setup complete.
 
 Version:       ${resolve_product_name} ${resolve_version} build ${resolve_build}
 Resolve path:  ${resolve_dir}
+Resolve HOME:  ${resolve_home}
 Container:     ${container}
 Launcher:      ${launcher_path}
 Desktop file:  ${desktop_path}

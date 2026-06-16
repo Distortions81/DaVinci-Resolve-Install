@@ -1,0 +1,6 @@
+.gitattributes text eol=lf
+README.md text eol=lf
+bin/davinci-resolve-docker.sh text eol=lf
+scripts/check-davinci-resolve-project-dbs.sh text eol=lf
+scripts/setup-davinci-resolve-docker.sh text eol=lf
+scripts/verify-davinci-resolve-docker.sh text eol=lf

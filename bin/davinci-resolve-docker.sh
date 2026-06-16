@@ -7,6 +7,10 @@ resolve_dir="${RESOLVE_DIR:-/opt/resolve}"
 uid="$(id -u)"
 display="${DISPLAY:-:0}"
 xauthority="${XAUTHORITY:-$HOME/.Xauthority}"
+resolve_home="${RESOLVE_HOME:-${HOME}/.local/share/davinci-resolve-box-home}"
+resolve_xdg_config_home="${RESOLVE_XDG_CONFIG_HOME:-${resolve_home}/.config}"
+resolve_xdg_data_home="${RESOLVE_XDG_DATA_HOME:-${resolve_home}/.local/share}"
+resolve_xdg_cache_home="${RESOLVE_XDG_CACHE_HOME:-${resolve_home}/.cache}"
 xdg_runtime="/run/user/${uid}"
 pulse_server="${PULSE_SERVER:-unix:${xdg_runtime}/pulse/native}"
 dbus_session="${DBUS_SESSION_BUS_ADDRESS:-unix:path=${xdg_runtime}/bus}"
@@ -14,6 +18,13 @@ dbus_session="${DBUS_SESSION_BUS_ADDRESS:-unix:path=${xdg_runtime}/bus}"
 die() {
   echo "davinci-resolve-docker: $*" >&2
   exit 1
+}
+
+need_absolute_path() {
+  case "$2" in
+    /*) ;;
+    *) die "$1 must be an absolute path: $2" ;;
+  esac
 }
 
 resolve_amd_opencl_lib() {
@@ -61,6 +72,16 @@ resolve_amd_opencl_lib() {
 host_opencl="$(resolve_amd_opencl_lib)"
 container_opencl="/run/host${host_opencl}"
 
+need_absolute_path "RESOLVE_HOME" "${resolve_home}"
+need_absolute_path "RESOLVE_XDG_CONFIG_HOME" "${resolve_xdg_config_home}"
+need_absolute_path "RESOLVE_XDG_DATA_HOME" "${resolve_xdg_data_home}"
+need_absolute_path "RESOLVE_XDG_CACHE_HOME" "${resolve_xdg_cache_home}"
+mkdir -p \
+  "${resolve_home}" \
+  "${resolve_xdg_config_home}" \
+  "${resolve_xdg_data_home}" \
+  "${resolve_xdg_cache_home}"
+
 if ! docker container inspect "${container}" >/dev/null 2>&1; then
   die "container '${container}' does not exist. Run scripts/setup-davinci-resolve-docker.sh from the repo first."
 fi
@@ -86,6 +107,10 @@ docker exec -u root \
 exec docker exec -u "${container_user}" \
   -e DISPLAY="${display}" \
   -e XAUTHORITY="${xauthority}" \
+  -e HOME="${resolve_home}" \
+  -e XDG_CONFIG_HOME="${resolve_xdg_config_home}" \
+  -e XDG_DATA_HOME="${resolve_xdg_data_home}" \
+  -e XDG_CACHE_HOME="${resolve_xdg_cache_home}" \
   -e XDG_RUNTIME_DIR="${xdg_runtime}" \
   -e PULSE_SERVER="${pulse_server}" \
   -e DBUS_SESSION_BUS_ADDRESS="${dbus_session}" \

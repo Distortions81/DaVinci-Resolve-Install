@@ -53,6 +53,7 @@ The setup script:
 - Adds `/dev/kfd`, `/dev/dri`, and the host `render`/`video` group IDs.
 - Installs Fedora runtime libraries required by Resolve.
 - Writes the container OpenCL ICD to use the host ROCm library.
+- Launches Resolve with a dedicated HOME/XDG state directory at `~/.local/share/davinci-resolve-box-home`.
 - Installs `davinci-resolve-docker` into `~/.local/bin`.
 - Installs a desktop launcher named `DaVinci Resolve (Docker)`.
 - Prints the Resolve install path, container name, launcher path, desktop file path, and launch command at the end.
@@ -84,6 +85,7 @@ DOWNLOAD_RESOLVE=auto
 RESOLVE_ZIP=/path/to/DaVinci_Resolve_Studio_20.3.3_Linux.zip
 RESOLVE_DOWNLOAD_URL=https://example.invalid/DaVinci_Resolve_Studio_20.3.3_Linux.zip
 ROCM_OPENCL_LIB=/opt/rocm/lib/libamdocl64.so
+RESOLVE_HOME=$HOME/.local/share/davinci-resolve-box-home
 PATCH_RESOLVE_LIBS=1
 INSTALL_LAUNCHER=1
 LAUNCH_AFTER_SETUP=0
@@ -93,6 +95,11 @@ The default download path is `~/.cache/davinci-resolve-docker/DaVinci_Resolve_St
 
 Use `RESOLVE_ZIP` to avoid downloading when you already have the official zip.
 Use `PATCH_RESOLVE_LIBS=0` if you do not want setup to move Resolve's bundled GLib/GIO libraries.
+
+The launcher forces Resolve's `HOME`, `XDG_CONFIG_HOME`, `XDG_DATA_HOME`, and
+`XDG_CACHE_HOME` into the dedicated `RESOLVE_HOME` tree. This keeps container
+Resolve state separate from native Resolve installs, other containers, and other
+Resolve versions.
 
 ## Bundled Installer
 
@@ -123,8 +130,37 @@ Expected results:
 - `/dev/kfd` is readable inside the container.
 - `clinfo` inside the container shows one AMD GPU device.
 - `ldd /opt/resolve/bin/resolve` reports no missing libraries.
+- The printed `HOME` and XDG paths point at the dedicated Resolve state tree.
+
+## Project Database Integrity
+
+After a hard crash, do not delete `*-wal`, `*-shm`, or `*-journal` files. Check
+project database integrity with:
+
+```bash
+./scripts/check-davinci-resolve-project-dbs.sh
+```
+
+By default this checks the isolated `RESOLVE_HOME`. To check a project library
+stored elsewhere, pass the path:
+
+```bash
+./scripts/check-davinci-resolve-project-dbs.sh /path/to/resolve/project/library
+```
+
+Keep Resolve project libraries on local SSD/NVMe storage. Avoid sync folders,
+network filesystems, FUSE mounts, container overlay storage, and opening the same
+library from native Resolve and container Resolve at the same time.
 
 ## Troubleshooting
+
+After a Resolve crash, inspect the verifier output and the host kernel log for
+AMD GPU resets, VM faults, ring failures, OOM kills, or segfaults:
+
+```bash
+./scripts/verify-davinci-resolve-docker.sh
+journalctl -k -b --no-pager | grep -Ei 'amdgpu|kfd|gpu reset|ring|vm fault|oom|segfault'
+```
 
 If OpenCL shows an AMD platform but zero devices, the container cannot read `/dev/kfd`. Recreate the container after confirming your host has `render` and `video` groups:
 
