@@ -115,6 +115,31 @@ The default download cache is:
 `RESOLVE_SHM_SIZE` is host RAM-backed IPC space, not GPU VRAM. It is not fully
 reserved unless used, and changing it requires recreating the container.
 
+## Recreate The Container
+
+Recreate the container whenever the host GPU/runtime surface changes, or when a
+Docker creation-time option needs to change.
+
+Do this after:
+
+- Kernel, Mesa, AMDGPU, ROCm, or OpenCL package updates.
+- Changing `RESOLVE_SHM_SIZE`, `RESOLVE_IMAGE`, device mappings, or group IDs.
+- Adding yourself to `docker`, `render`, or `video`.
+- Verifier output shows `/dev/shm` below 16 GiB.
+- Resolve sees the AMD OpenCL platform but no GPU device.
+- Rare crashes start after a host graphics/runtime update.
+
+Command:
+
+```bash
+docker rm -f davincibox-docker
+RESOLVE_SHM_SIZE=16g ./scripts/setup-davinci-resolve-docker.sh
+./scripts/verify-davinci-resolve-docker.sh
+```
+
+Use the same `RESOLVE_CONTAINER`, `RESOLVE_HOME`, `RESOLVE_DIR`, and
+`RESOLVE_SHM_SIZE` values you used for setup if you customized them.
+
 ## Verify
 
 Run:
@@ -142,6 +167,8 @@ Practical guidance for the RX 7900 XT and similar AMD GPUs:
 
 - Resolve needs AMD's ROCm OpenCL ICD, usually `libamdocl64.so`. Mesa OpenCL
   alone is not enough for this setup.
+- In Resolve preferences, use OpenCL and manually select only the RX 7900 XT if
+  another AMD GPU or iGPU appears.
 - Rare crashes on a 20 GB RX 7900 XT are less likely to be simple VRAM pressure
   and more likely to involve host/container runtime drift, `/dev/shm`, project
   state, permissions, or GPU reset behavior.
@@ -175,12 +202,7 @@ First run the verifier and inspect the host kernel log:
 journalctl -k -b --no-pager | grep -Ei 'amdgpu|kfd|gpu reset|ring|vm fault|oom|segfault'
 ```
 
-If `/dev/shm` is below 16 GiB, recreate the container:
-
-```bash
-docker rm -f davincibox-docker
-RESOLVE_SHM_SIZE=16g ./scripts/setup-davinci-resolve-docker.sh
-```
+If `/dev/shm` is below 16 GiB, recreate the container with `RESOLVE_SHM_SIZE=16g`.
 
 Force Resolve to rescan the GPU:
 
