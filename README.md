@@ -79,9 +79,9 @@ To keep Resolve 20 and Resolve 21 side by side, use separate values for
 - Writes the container OpenCL ICD to the host ROCm OpenCL library.
 - Creates an isolated Resolve state tree at
   `~/.local/share/davinci-resolve-21-box-home`.
-- Writes per-launch ALSA/Pulse client config inside the isolated Resolve state
-  tree. If the host Pulse/PipeWire socket is unavailable, the launcher falls
-  back to ALSA null output so audio initialization should not crash Resolve.
+- Uses the container ALSA/Pulse defaults for normal audio output. Optional
+  launcher audio modes can fall back to ALSA null output if Pulse/PipeWire is
+  unavailable or being isolated during crash troubleshooting.
 - Installs the `davinci-resolve-docker` launcher and desktop entry.
 
 The launcher also creates a single-instance lock at
@@ -101,7 +101,7 @@ Set these before running setup when needed:
 | `RESOLVE_DIR` | `/opt/resolve` | Resolve install path on the host |
 | `RESOLVE_HOME` | `~/.local/share/davinci-resolve-21-box-home` | Isolated Resolve HOME/XDG state |
 | `RESOLVE_LOCK_DIR` | `$RESOLVE_HOME/.davinci-resolve-docker.lock` | Single-instance lock |
-| `RESOLVE_AUDIO_MODE` | `auto` | `auto`, `pulse`, `null`, or `off` audio config mode |
+| `RESOLVE_AUDIO_MODE` | `system` | `system`, `auto`, `pulse`, or `null` audio mode |
 | `RESOLVE_SHM_SIZE` | `16g` | Docker `/dev/shm` size at container creation |
 | `RESOLVE_ZIP` | unset | Local official Resolve zip |
 | `RESOLVE_DOWNLOAD_ID` | pinned 21.0 ID | Blackmagic download ID |
@@ -118,6 +118,18 @@ The default download cache is:
 
 `RESOLVE_SHM_SIZE` is host RAM-backed IPC space, not GPU VRAM. It is not fully
 reserved unless used, and changing it requires recreating the container.
+
+Audio defaults to `RESOLVE_AUDIO_MODE=system`, which uses the container
+`/etc/asound.conf` Pulse setup. For one launch, you can also use:
+
+```bash
+davinci-resolve-docker --audio=system
+davinci-resolve-docker --audio=auto
+davinci-resolve-docker --audio=null
+```
+
+`--audio=null` intentionally disables audible output with a temporary ALSA null
+device and is meant only for isolating audio-related crashes.
 
 ## Recreate The Container
 
@@ -160,9 +172,10 @@ Expected results:
 - `clinfo` inside the container shows an AMD GPU device.
 - `ldd /opt/resolve/bin/resolve` reports no missing libraries.
 - HOME/XDG paths point at the isolated Resolve 21 state tree.
-- Audio reports a Pulse/PipeWire socket and ALSA `default` opens cleanly. If the
-  socket is missing, `RESOLVE_AUDIO_MODE=auto` uses null output instead of
-  letting failed audio output take down Resolve.
+- Audio reports a Pulse/PipeWire socket and ALSA `default` opens cleanly. The
+  default `RESOLVE_AUDIO_MODE=system` matches the container ALSA/Pulse defaults.
+  Use `davinci-resolve-docker --audio=null` only when isolating audio from a
+  crash.
 - The launcher lock is absent, active, or stale as expected.
 
 ## AMD GPU Notes

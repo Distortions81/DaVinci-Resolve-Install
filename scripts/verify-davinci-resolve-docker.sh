@@ -64,7 +64,7 @@ done
 
 echo
 echo "Audio:"
-echo "  RESOLVE_AUDIO_MODE=${RESOLVE_AUDIO_MODE:-auto}"
+echo "  RESOLVE_AUDIO_MODE=${RESOLVE_AUDIO_MODE:-system}"
 echo "  PULSE_SERVER=${pulse_server}"
 if pulse_socket="$(audio_socket_path)"; then
   if [ -S "${pulse_socket}" ]; then
@@ -78,7 +78,7 @@ fi
 if [ -f "${resolve_home}/.davinci-resolve-docker-audio-mode" ]; then
   echo "  last launcher mode=$(cat "${resolve_home}/.davinci-resolve-docker-audio-mode")"
 else
-  echo "  last launcher mode=unknown (launch Resolve once to generate audio config)"
+  echo "  last launcher mode=unknown (launch Resolve once to record audio mode)"
 fi
 if [ -f "${resolve_home}/.asoundrc" ]; then
   echo "  asoundrc=${resolve_home}/.asoundrc"
