@@ -7,13 +7,15 @@ resolve_dir="${RESOLVE_DIR:-/opt/resolve}"
 uid="$(id -u)"
 display="${DISPLAY:-:0}"
 xauthority="${XAUTHORITY:-$HOME/.Xauthority}"
-resolve_home="${RESOLVE_HOME:-${HOME}/.local/share/davinci-resolve-box-home}"
+resolve_home="${RESOLVE_HOME:-${HOME}/.local/share/davinci-resolve-21-box-home}"
 resolve_xdg_config_home="${RESOLVE_XDG_CONFIG_HOME:-${resolve_home}/.config}"
 resolve_xdg_data_home="${RESOLVE_XDG_DATA_HOME:-${resolve_home}/.local/share}"
 resolve_xdg_cache_home="${RESOLVE_XDG_CACHE_HOME:-${resolve_home}/.cache}"
+resolve_lock_dir="${RESOLVE_LOCK_DIR:-${resolve_home}/.davinci-resolve-docker.lock}"
 xdg_runtime="/run/user/${uid}"
 pulse_server="${PULSE_SERVER:-unix:${xdg_runtime}/pulse/native}"
 dbus_session="${DBUS_SESSION_BUS_ADDRESS:-unix:path=${xdg_runtime}/bus}"
+lock_acquired=0
 
 die() {
   echo "davinci-resolve-docker: $*" >&2
@@ -25,6 +27,47 @@ need_absolute_path() {
     /*) ;;
     *) die "$1 must be an absolute path: $2" ;;
   esac
+}
+
+cleanup_lock() {
+  if [ "${lock_acquired}" = "1" ] && [ -d "${resolve_lock_dir}" ]; then
+    local owner_pid
+    owner_pid="$(cat "${resolve_lock_dir}/pid" 2>/dev/null || true)"
+    if [ "${owner_pid}" = "$$" ]; then
+      rm -rf -- "${resolve_lock_dir}"
+    fi
+  fi
+}
+
+handle_signal() {
+  local status="$1"
+  cleanup_lock
+  exit "${status}"
+}
+
+acquire_lock() {
+  while ! mkdir "${resolve_lock_dir}" 2>/dev/null; do
+    local owner_pid
+    owner_pid="$(cat "${resolve_lock_dir}/pid" 2>/dev/null || true)"
+
+    if [[ "${owner_pid}" =~ ^[0-9]+$ ]] && kill -0 "${owner_pid}" 2>/dev/null; then
+      die "Resolve is already running for RESOLVE_HOME=${resolve_home} (launcher pid ${owner_pid})."
+    fi
+
+    echo "davinci-resolve-docker: removing stale Resolve lock at ${resolve_lock_dir}" >&2
+    rm -rf -- "${resolve_lock_dir}"
+  done
+
+  lock_acquired=1
+  printf '%s\n' "$$" > "${resolve_lock_dir}/pid"
+  printf '%s\n' "${container}" > "${resolve_lock_dir}/container"
+  printf '%s\n' "${resolve_home}" > "${resolve_lock_dir}/resolve_home"
+  date -Is > "${resolve_lock_dir}/created_at" 2>/dev/null || date > "${resolve_lock_dir}/created_at"
+
+  trap cleanup_lock EXIT
+  trap 'handle_signal 129' HUP
+  trap 'handle_signal 130' INT
+  trap 'handle_signal 143' TERM
 }
 
 resolve_amd_opencl_lib() {
@@ -76,11 +119,14 @@ need_absolute_path "RESOLVE_HOME" "${resolve_home}"
 need_absolute_path "RESOLVE_XDG_CONFIG_HOME" "${resolve_xdg_config_home}"
 need_absolute_path "RESOLVE_XDG_DATA_HOME" "${resolve_xdg_data_home}"
 need_absolute_path "RESOLVE_XDG_CACHE_HOME" "${resolve_xdg_cache_home}"
+need_absolute_path "RESOLVE_LOCK_DIR" "${resolve_lock_dir}"
 mkdir -p \
   "${resolve_home}" \
   "${resolve_xdg_config_home}" \
   "${resolve_xdg_data_home}" \
   "${resolve_xdg_cache_home}"
+
+acquire_lock
 
 if ! docker container inspect "${container}" >/dev/null 2>&1; then
   die "container '${container}' does not exist. Run scripts/setup-davinci-resolve-docker.sh from the repo first."
@@ -104,7 +150,8 @@ docker exec -u root \
   printf "%s\n" "${CONTAINER_OPENCL}" > /etc/OpenCL/vendors/amdocl64-host.icd
 '
 
-exec docker exec -u "${container_user}" \
+set +e
+docker exec -u "${container_user}" \
   -e DISPLAY="${display}" \
   -e XAUTHORITY="${xauthority}" \
   -e HOME="${resolve_home}" \
@@ -118,3 +165,6 @@ exec docker exec -u "${container_user}" \
   -w /opt/resolve \
   "${container}" \
   /opt/resolve/bin/resolve "$@"
+status="$?"
+set -e
+exit "${status}"

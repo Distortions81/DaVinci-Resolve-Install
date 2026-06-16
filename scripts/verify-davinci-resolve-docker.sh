@@ -3,10 +3,12 @@ set -euo pipefail
 
 container="${RESOLVE_CONTAINER:-davincibox-docker}"
 container_user="${RESOLVE_USER:-$(id -un)}"
-resolve_home="${RESOLVE_HOME:-${HOME}/.local/share/davinci-resolve-box-home}"
+resolve_home="${RESOLVE_HOME:-${HOME}/.local/share/davinci-resolve-21-box-home}"
 resolve_xdg_config_home="${RESOLVE_XDG_CONFIG_HOME:-${resolve_home}/.config}"
 resolve_xdg_data_home="${RESOLVE_XDG_DATA_HOME:-${resolve_home}/.local/share}"
 resolve_xdg_cache_home="${RESOLVE_XDG_CACHE_HOME:-${resolve_home}/.cache}"
+resolve_lock_dir="${RESOLVE_LOCK_DIR:-${resolve_home}/.davinci-resolve-docker.lock}"
+recommended_shm_bytes=$((16 * 1024 * 1024 * 1024))
 
 if ! docker container inspect "${container}" >/dev/null 2>&1; then
   echo "Container '${container}' does not exist." >&2
@@ -18,7 +20,12 @@ if [ "$(docker inspect -f '{{.State.Running}}' "${container}")" != "true" ]; the
 fi
 
 echo "Container:"
+container_shm="$(docker inspect -f '{{.HostConfig.ShmSize}}' "${container}")"
 docker inspect -f '  name={{.Name}} running={{.State.Running}} image={{.Config.Image}} groups={{json .HostConfig.GroupAdd}} devices={{json .HostConfig.Devices}}' "${container}"
+echo "  shm=${container_shm} bytes"
+if [[ "${container_shm}" =~ ^[0-9]+$ ]] && [ "${container_shm}" -lt "${recommended_shm_bytes}" ]; then
+  echo "  warning: /dev/shm is below the recommended 16 GiB. Recreate the container with RESOLVE_SHM_SIZE=16g."
+fi
 
 echo
 echo "Host session:"
@@ -26,6 +33,10 @@ echo "  XDG_SESSION_TYPE=${XDG_SESSION_TYPE:-unknown}"
 if [ "${XDG_SESSION_TYPE:-}" != "x11" ]; then
   echo "  warning: this setup is expected to be most reliable from an X11 session"
 fi
+
+echo
+echo "Host GPU groups:"
+getent group render video || true
 
 echo
 echo "Resolve isolated state:"
@@ -40,6 +51,21 @@ for path in "${resolve_home}" "${resolve_xdg_config_home}" "${resolve_xdg_data_h
     echo "  missing: ${path} (created by the launcher on first run)"
   fi
 done
+
+echo
+echo "Launcher lock:"
+echo "  path=${resolve_lock_dir}"
+if [ -d "${resolve_lock_dir}" ]; then
+  lock_pid="$(cat "${resolve_lock_dir}/pid" 2>/dev/null || true)"
+  echo "  pid=${lock_pid:-unknown}"
+  if [[ "${lock_pid}" =~ ^[0-9]+$ ]] && kill -0 "${lock_pid}" 2>/dev/null; then
+    echo "  status=active"
+  else
+    echo "  status=stale"
+  fi
+else
+  echo "  status=absent"
+fi
 
 echo
 echo "Device permissions:"
@@ -71,6 +97,12 @@ docker exec -u "${container_user}" \
     fi
   done
   [ "${readable_render_node}" -eq 1 ] || echo "render node: no readable /dev/dri/renderD* node found"
+'
+
+echo
+echo "Shared memory:"
+docker exec -u "${container_user}" "${container}" bash -lc '
+  df -h /dev/shm
 '
 
 echo

@@ -8,7 +8,8 @@ container="${RESOLVE_CONTAINER:-davincibox-docker}"
 image="${RESOLVE_IMAGE:-fedora:39}"
 resolve_dir="${RESOLVE_DIR:-/opt/resolve}"
 container_user="${RESOLVE_USER:-$(id -un)}"
-resolve_home="${RESOLVE_HOME:-${HOME}/.local/share/davinci-resolve-box-home}"
+resolve_home="${RESOLVE_HOME:-${HOME}/.local/share/davinci-resolve-21-box-home}"
+resolve_shm_size="${RESOLVE_SHM_SIZE:-16g}"
 install_launcher="${INSTALL_LAUNCHER:-1}"
 patch_resolve_libs="${PATCH_RESOLVE_LIBS:-1}"
 download_resolve="${DOWNLOAD_RESOLVE:-auto}"
@@ -16,10 +17,11 @@ overwrite_resolve="${OVERWRITE_RESOLVE:-0}"
 launch_after_setup="${LAUNCH_AFTER_SETUP:-0}"
 allow_unsupported_resolve="${ALLOW_UNSUPPORTED_RESOLVE:-0}"
 
-supported_resolve_version="20.3.3"
-supported_resolve_build="10"
+supported_resolve_version="21.0"
+supported_resolve_build="48"
 supported_resolve_edition="Studio"
 supported_image="fedora:39"
+recommended_shm_bytes=$((16 * 1024 * 1024 * 1024))
 
 resolve_version="${RESOLVE_VERSION:-${supported_resolve_version}}"
 resolve_build="${RESOLVE_BUILD:-${supported_resolve_build}}"
@@ -27,7 +29,7 @@ resolve_edition="${RESOLVE_EDITION:-Studio}"
 resolve_product_name="DaVinci Resolve Studio"
 resolve_zip_name="DaVinci_Resolve_Studio_${resolve_version}_Linux.zip"
 resolve_run_name="DaVinci_Resolve_Studio_${resolve_version}_Linux.run"
-resolve_download_id="${RESOLVE_DOWNLOAD_ID:-ad27248499354f5aa01ad1e940bfbf46}"
+resolve_download_id="${RESOLVE_DOWNLOAD_ID:-6dfcd748c3494be3b3e8650af3ec6d36}"
 resolve_download_dir="${RESOLVE_DOWNLOAD_DIR:-${XDG_CACHE_HOME:-${HOME}/.cache}/davinci-resolve-docker}"
 
 launcher_path="${HOME}/.local/bin/davinci-resolve-docker"
@@ -136,6 +138,12 @@ validate_supported_target() {
   fi
 }
 
+validate_shm_size() {
+  if ! [[ "${resolve_shm_size}" =~ ^[0-9]+([kKmMgG])?$ ]]; then
+    die "invalid RESOLVE_SHM_SIZE value: ${resolve_shm_size}. Use a Docker size such as 16g or 17179869184."
+  fi
+}
+
 check_host_session() {
   if [ -n "${XDG_SESSION_TYPE:-}" ] && [ "${XDG_SESSION_TYPE}" != "x11" ]; then
     log "warning: XDG_SESSION_TYPE=${XDG_SESSION_TYPE}; this setup is validated on Xorg/X11"
@@ -200,8 +208,11 @@ check_existing_resolve_marker() {
   marker="$(resolve_marker_path)"
 
   if [ ! -f "${marker}" ]; then
-    log "warning: existing Resolve install has no ${marker}; assuming it is ${resolve_product_name} ${resolve_version} build ${resolve_build}"
-    return 0
+    if is_truthy "${allow_unsupported_resolve}"; then
+      log "warning: existing Resolve install has no ${marker}; using it because ALLOW_UNSUPPORTED_RESOLVE=1"
+      return 0
+    fi
+    die "existing Resolve install has no ${marker}, so setup cannot verify it is ${resolve_product_name} ${resolve_version} build ${resolve_build}. Set OVERWRITE_RESOLVE=1 to replace it, or use a different RESOLVE_DIR."
   fi
 
   if grep -qx "resolve_version=${resolve_version}" "${marker}" && grep -qx "resolve_build=${resolve_build}" "${marker}"; then
@@ -284,14 +295,16 @@ install_resolve_tree() {
     die "${resolve_dir} already exists but ${resolve_dir}/bin/resolve is missing. Set OVERWRITE_RESOLVE=1 to replace it."
   fi
 
-  need_sudo_or_write_access "${target_parent}"
-
   log "installing ${resolve_product_name} ${resolve_version} to ${resolve_dir}"
-  if [ -w "${target_parent}" ]; then
+  if [ -d "${resolve_dir}" ] && [ -w "${resolve_dir}" ]; then
+    find "${resolve_dir}" -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +
+    cp -a "${source_dir}/." "${resolve_dir}/"
+  elif [ -w "${target_parent}" ]; then
     rm -rf "${resolve_dir}"
     mkdir -p "${resolve_dir}"
     cp -a "${source_dir}/." "${resolve_dir}/"
   else
+    need_sudo_or_write_access "${target_parent}"
     run_root rm -rf "${resolve_dir}"
     run_root mkdir -p "${resolve_dir}"
     run_root cp -a "${source_dir}/." "${resolve_dir}/"
@@ -330,9 +343,13 @@ extract_and_install_resolve() {
 
 ensure_resolve_installed() {
   if [ -x "${resolve_dir}/bin/resolve" ]; then
-    check_existing_resolve_marker
-    log "Resolve already installed at ${resolve_dir}"
-    return 0
+    if [ "${overwrite_resolve}" = "1" ]; then
+      log "OVERWRITE_RESOLVE=1; replacing existing Resolve install at ${resolve_dir}"
+    else
+      check_existing_resolve_marker
+      log "Resolve already installed at ${resolve_dir}"
+      return 0
+    fi
   fi
 
   case "${download_resolve}" in
@@ -426,7 +443,17 @@ patch_resolve_glib_libs() {
 
 create_container() {
   if docker container inspect "${container}" >/dev/null 2>&1; then
+    local current_shm
+    current_shm="$(docker inspect -f '{{.HostConfig.ShmSize}}' "${container}" 2>/dev/null || true)"
     log "container already exists: ${container}"
+    if [[ "${current_shm}" =~ ^[0-9]+$ ]]; then
+      log "container shared memory: ${current_shm} bytes"
+      if [ "${current_shm}" -lt "${recommended_shm_bytes}" ]; then
+        log "warning: container /dev/shm is below the recommended 16 GiB. Recreate the container to apply RESOLVE_SHM_SIZE=${resolve_shm_size}."
+      fi
+    else
+      log "warning: could not inspect container shared memory size"
+    fi
     return 0
   fi
 
@@ -435,12 +462,12 @@ create_container() {
   [ -n "${render_gid}" ] || die "host group 'render' does not exist"
   video_gid="$(group_gid video || true)"
 
-  flags="--device /dev/kfd --device /dev/dri --group-add ${render_gid}"
+  flags="--device /dev/kfd --device /dev/dri --group-add ${render_gid} --shm-size=${resolve_shm_size}"
   if [ -n "${video_gid}" ] && [ "${video_gid}" != "${render_gid}" ]; then
     flags="${flags} --group-add ${video_gid}"
   fi
 
-  log "creating Docker-backed Distrobox '${container}' from ${image}"
+  log "creating Docker-backed Distrobox '${container}' from ${image} with /dev/shm=${resolve_shm_size}"
   if ! DBX_CONTAINER_MANAGER=docker distrobox create \
     --image "${image}" \
     --name "${container}" \
@@ -547,6 +574,7 @@ verify_container() {
 }
 
 validate_supported_target
+validate_shm_size
 check_host_session
 need_cmd docker
 need_cmd distrobox
@@ -582,6 +610,7 @@ Version:       ${resolve_product_name} ${resolve_version} build ${resolve_build}
 Resolve path:  ${resolve_dir}
 Resolve HOME:  ${resolve_home}
 Container:     ${container}
+Requested shm: ${resolve_shm_size}
 Launcher:      ${launcher_path}
 Desktop file:  ${desktop_path}
 

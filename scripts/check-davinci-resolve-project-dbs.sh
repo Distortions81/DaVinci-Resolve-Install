@@ -3,7 +3,7 @@ set -euo pipefail
 
 container="${RESOLVE_CONTAINER:-davincibox-docker}"
 container_user="${RESOLVE_USER:-$(id -un)}"
-resolve_home="${RESOLVE_HOME:-${HOME}/.local/share/davinci-resolve-box-home}"
+resolve_home="${RESOLVE_HOME:-${HOME}/.local/share/davinci-resolve-21-box-home}"
 resolve_xdg_config_home="${RESOLVE_XDG_CONFIG_HOME:-${resolve_home}/.config}"
 resolve_xdg_data_home="${RESOLVE_XDG_DATA_HOME:-${resolve_home}/.local/share}"
 resolve_xdg_cache_home="${RESOLVE_XDG_CACHE_HOME:-${resolve_home}/.cache}"
