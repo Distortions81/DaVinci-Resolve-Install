@@ -3,12 +3,22 @@ set -euo pipefail
 
 container="${RESOLVE_CONTAINER:-davincibox-docker}"
 container_user="${RESOLVE_USER:-$(id -un)}"
+uid="$(id -u)"
 resolve_home="${RESOLVE_HOME:-${HOME}/.local/share/davinci-resolve-21-box-home}"
 resolve_xdg_config_home="${RESOLVE_XDG_CONFIG_HOME:-${resolve_home}/.config}"
 resolve_xdg_data_home="${RESOLVE_XDG_DATA_HOME:-${resolve_home}/.local/share}"
 resolve_xdg_cache_home="${RESOLVE_XDG_CACHE_HOME:-${resolve_home}/.cache}"
 resolve_lock_dir="${RESOLVE_LOCK_DIR:-${resolve_home}/.davinci-resolve-docker.lock}"
+pulse_server="${PULSE_SERVER:-unix:/run/user/${uid}/pulse/native}"
 recommended_shm_bytes=$((16 * 1024 * 1024 * 1024))
+
+audio_socket_path() {
+  case "${pulse_server}" in
+    unix:/*) printf '%s\n' "${pulse_server#unix:}" ;;
+    unix:path=*) printf '%s\n' "${pulse_server#unix:path=}" ;;
+    *) return 1 ;;
+  esac
+}
 
 if ! docker container inspect "${container}" >/dev/null 2>&1; then
   echo "Container '${container}' does not exist." >&2
@@ -51,6 +61,68 @@ for path in "${resolve_home}" "${resolve_xdg_config_home}" "${resolve_xdg_data_h
     echo "  missing: ${path} (created by the launcher on first run)"
   fi
 done
+
+echo
+echo "Audio:"
+echo "  RESOLVE_AUDIO_MODE=${RESOLVE_AUDIO_MODE:-auto}"
+echo "  PULSE_SERVER=${pulse_server}"
+if pulse_socket="$(audio_socket_path)"; then
+  if [ -S "${pulse_socket}" ]; then
+    echo "  host pulse socket=present (${pulse_socket})"
+  else
+    echo "  host pulse socket=missing (${pulse_socket})"
+  fi
+else
+  echo "  host pulse socket=not a unix socket path"
+fi
+if [ -f "${resolve_home}/.davinci-resolve-docker-audio-mode" ]; then
+  echo "  last launcher mode=$(cat "${resolve_home}/.davinci-resolve-docker-audio-mode")"
+else
+  echo "  last launcher mode=unknown (launch Resolve once to generate audio config)"
+fi
+if [ -f "${resolve_home}/.asoundrc" ]; then
+  echo "  asoundrc=${resolve_home}/.asoundrc"
+else
+  echo "  asoundrc=missing"
+fi
+if [ -f "${resolve_xdg_config_home}/pulse/client.conf" ]; then
+  echo "  pulse client=${resolve_xdg_config_home}/pulse/client.conf"
+else
+  echo "  pulse client=missing"
+fi
+docker exec -u "${container_user}" \
+  -e HOME="${resolve_home}" \
+  -e XDG_CONFIG_HOME="${resolve_xdg_config_home}" \
+  -e XDG_DATA_HOME="${resolve_xdg_data_home}" \
+  -e XDG_CACHE_HOME="${resolve_xdg_cache_home}" \
+  -e XDG_RUNTIME_DIR="/run/user/${uid}" \
+  -e PULSE_SERVER="${pulse_server}" \
+  "${container}" bash -lc '
+  if [ -S "${XDG_RUNTIME_DIR}/pulse/native" ]; then
+    echo "  container pulse socket=present (${XDG_RUNTIME_DIR}/pulse/native)"
+  else
+    echo "  container pulse socket=missing (${XDG_RUNTIME_DIR}/pulse/native)"
+  fi
+  python3 - <<'"'"'PY'"'"'
+import ctypes
+import sys
+
+alsa = ctypes.CDLL("libasound.so.2")
+pcm = ctypes.c_void_p()
+err = alsa.snd_pcm_open(ctypes.byref(pcm), b"default", 0, 0)
+print(f"  alsa pcm default open={err}")
+if err == 0:
+    alsa.snd_pcm_close(pcm)
+
+ctl = ctypes.c_void_p()
+err = alsa.snd_ctl_open(ctypes.byref(ctl), b"default", 0)
+print(f"  alsa ctl default open={err}")
+if err == 0:
+    alsa.snd_ctl_close(ctl)
+
+sys.exit(0)
+PY
+'
 
 echo
 echo "Launcher lock:"
