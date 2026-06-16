@@ -80,8 +80,10 @@ To keep Resolve 20 and Resolve 21 side by side, use separate values for
 - Creates an isolated Resolve state tree at
   `~/.local/share/davinci-resolve-21-box-home`.
 - Writes per-launch ALSA/Pulse client config inside the isolated Resolve state
-  tree. If the host Pulse/PipeWire socket is unavailable, the launcher falls
-  back to ALSA null output so audio initialization should not crash Resolve.
+  tree. Pulse output is forced through a stereo ALSA `plug` device for normal
+  desktop sinks. If the host Pulse/PipeWire socket is unavailable, the launcher
+  falls back to ALSA null output so audio initialization should not crash
+  Resolve.
 - Installs the `davinci-resolve-docker` launcher and desktop entry.
 
 The launcher also creates a single-instance lock at
