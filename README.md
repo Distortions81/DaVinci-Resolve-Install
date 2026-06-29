@@ -1,6 +1,6 @@
 # DaVinci Resolve 21 on Kubuntu 24.04 with AMD
 
-Docker/Distrobox setup for **DaVinci Resolve Studio 21.0 build 48** on
+Docker/Distrobox setup for **DaVinci Resolve Studio 21.0.1 build 11** on
 Kubuntu/Ubuntu 24.04 with AMD ROCm/OpenCL.
 
 Validated target:
@@ -67,8 +67,8 @@ To keep Resolve 20 and Resolve 21 side by side, use separate values for
 
 ## What Setup Does
 
-- Uses `vendor/blackmagic/DaVinci_Resolve_Studio_21.0_Linux.zip` if present.
-- Otherwise downloads the pinned Resolve Studio 21.0 Linux archive from
+- Uses `vendor/blackmagic/DaVinci_Resolve_Studio_21.0.1_Linux.zip` if present.
+- Otherwise downloads the pinned Resolve Studio 21.0.1 Linux archive from
   Blackmagic Design.
 - Refuses unvalidated Resolve versions unless `ALLOW_UNSUPPORTED_RESOLVE=1`.
 - Installs Resolve to `/opt/resolve`.
@@ -104,7 +104,7 @@ Set these before running setup when needed:
 | `RESOLVE_AUDIO_MODE` | `system` | `system`, `auto`, `pulse`, or `null` audio mode |
 | `RESOLVE_SHM_SIZE` | `16g` | Docker `/dev/shm` size at container creation |
 | `RESOLVE_ZIP` | unset | Local official Resolve zip |
-| `RESOLVE_DOWNLOAD_ID` | pinned 21.0 ID | Blackmagic download ID |
+| `RESOLVE_DOWNLOAD_ID` | pinned 21.0.1 ID | Blackmagic download ID |
 | `OVERWRITE_RESOLVE` | `0` | Replace an existing `/opt/resolve` tree |
 | `ROCM_OPENCL_LIB` | auto-detected | Host `libamdocl64.so` path |
 | `PATCH_RESOLVE_LIBS` | `1` | Move bundled GLib/GIO libraries aside |
@@ -113,7 +113,7 @@ Set these before running setup when needed:
 The default download cache is:
 
 ```text
-~/.cache/davinci-resolve-docker/DaVinci_Resolve_Studio_21.0_Linux.zip
+~/.cache/davinci-resolve-docker/DaVinci_Resolve_Studio_21.0.1_Linux.zip
 ```
 
 `RESOLVE_SHM_SIZE` is host RAM-backed IPC space, not GPU VRAM. It is not fully
@@ -267,7 +267,7 @@ library from native Resolve and container Resolve at the same time.
 This checkout may include:
 
 ```text
-vendor/blackmagic/DaVinci_Resolve_Studio_21.0_Linux.zip
+vendor/blackmagic/DaVinci_Resolve_Studio_21.0.1_Linux.zip
 vendor/blackmagic/SHA256SUMS
 ```
 
