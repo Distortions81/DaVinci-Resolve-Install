@@ -5,7 +5,7 @@ resolve_home="${RESOLVE_HOME:-${HOME}/.local/share/davinci-resolve-21-box-home}"
 resolve_xdg_data_home="${RESOLVE_XDG_DATA_HOME:-${resolve_home}/.local/share}"
 
 die() {
-  printf 'reset-davinci-resolve-gpu-cache: ERROR: %s\n' "$*" >&2
+  printf 'reset-gpu-cache: ERROR: %s\n' "$*" >&2
   exit 1
 }
 

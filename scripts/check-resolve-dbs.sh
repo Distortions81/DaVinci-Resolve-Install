@@ -68,4 +68,4 @@ docker exec -u "${container_user}" \
     fi
 
     exit "${status}"
-  ' check-davinci-resolve-project-dbs "${roots[@]}"
+  ' check-resolve-dbs "${roots[@]}"

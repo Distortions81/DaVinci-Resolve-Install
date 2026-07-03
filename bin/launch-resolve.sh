@@ -226,7 +226,7 @@ configure_audio
 acquire_lock
 
 if ! docker container inspect "${container}" >/dev/null 2>&1; then
-  die "container '${container}' does not exist. Run scripts/setup-davinci-resolve-docker.sh from the repo first."
+  die "container '${container}' does not exist. Run ./quickstart.sh from the repo first."
 fi
 
 if [ "$(docker inspect -f '{{.State.Running}}' "${container}")" != "true" ]; then

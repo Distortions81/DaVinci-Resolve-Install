@@ -15,21 +15,22 @@ patch_resolve_libs="${PATCH_RESOLVE_LIBS:-1}"
 download_resolve="${DOWNLOAD_RESOLVE:-auto}"
 overwrite_resolve="${OVERWRITE_RESOLVE:-0}"
 launch_after_setup="${LAUNCH_AFTER_SETUP:-0}"
-allow_unsupported_resolve="${ALLOW_UNSUPPORTED_RESOLVE:-0}"
+resolve_edition="${RESOLVE_EDITION:-Studio}"
 
 supported_resolve_version="21.0.2"
 supported_resolve_build="4"
-supported_resolve_edition="Studio"
 supported_image="fedora:39"
 recommended_shm_bytes=$((16 * 1024 * 1024 * 1024))
+studio_download_id="ec36996cf2694986b514285fffa37e46"
+free_download_id="81eb9de9e7f14eca9da1f92376a39d70"
 
-resolve_version="${RESOLVE_VERSION:-${supported_resolve_version}}"
-resolve_build="${RESOLVE_BUILD:-${supported_resolve_build}}"
-resolve_edition="${RESOLVE_EDITION:-Studio}"
-resolve_product_name="DaVinci Resolve Studio"
-resolve_zip_name="DaVinci_Resolve_Studio_${resolve_version}_Linux.zip"
-resolve_run_name="DaVinci_Resolve_Studio_${resolve_version}_Linux.run"
-resolve_download_id="${RESOLVE_DOWNLOAD_ID:-ec36996cf2694986b514285fffa37e46}"
+resolve_version="${supported_resolve_version}"
+resolve_build="${supported_resolve_build}"
+resolve_product_name=""
+resolve_archive_name=""
+resolve_zip_name=""
+resolve_run_name=""
+resolve_download_id=""
 resolve_download_dir="${RESOLVE_DOWNLOAD_DIR:-${XDG_CACHE_HOME:-${HOME}/.cache}/davinci-resolve-docker}"
 
 launcher_path="${HOME}/.local/bin/davinci-resolve-docker"
@@ -104,35 +105,30 @@ resolve_marker_path() {
   printf '%s/.davinci-resolve-docker-target\n' "${resolve_dir}"
 }
 
-is_truthy() {
-  case "$1" in
-    1|yes|true) return 0 ;;
-    0|no|false) return 1 ;;
-    *) die "invalid boolean value: $1" ;;
+configure_resolve_edition() {
+  case "${resolve_edition,,}" in
+    studio|resolve-studio|resolve_studio|resolve\ studio|davinci\ resolve\ studio)
+      resolve_edition="Studio"
+      resolve_product_name="DaVinci Resolve Studio"
+      resolve_archive_name="DaVinci_Resolve_Studio"
+      resolve_download_id="${studio_download_id}"
+      ;;
+    resolve|free|davinci\ resolve)
+      resolve_edition="Resolve"
+      resolve_product_name="DaVinci Resolve"
+      resolve_archive_name="DaVinci_Resolve"
+      resolve_download_id="${free_download_id}"
+      ;;
+    *)
+      die "invalid RESOLVE_EDITION value: ${resolve_edition}. Use Studio or Resolve."
+      ;;
   esac
+
+  resolve_zip_name="${resolve_archive_name}_${resolve_version}_Linux.zip"
+  resolve_run_name="${resolve_archive_name}_${resolve_version}_Linux.run"
 }
 
 validate_supported_target() {
-  if [ "${resolve_edition}" != "${supported_resolve_edition}" ]; then
-    die "this setup currently supports DaVinci Resolve Studio archives only; got RESOLVE_EDITION=${resolve_edition}"
-  fi
-
-  local unsupported=0
-  if [ "${resolve_version}" != "${supported_resolve_version}" ] || [ "${resolve_build}" != "${supported_resolve_build}" ]; then
-    unsupported=1
-  fi
-
-  if [ "${unsupported}" -eq 1 ]; then
-    if is_truthy "${allow_unsupported_resolve}"; then
-      log "warning: this repo is validated for ${resolve_product_name} ${supported_resolve_version} build ${supported_resolve_build}; using ${resolve_version} build ${resolve_build}"
-      if [ -z "${RESOLVE_ZIP:-}" ] && [ -z "${RESOLVE_DOWNLOAD_URL:-}" ] && [ -z "${RESOLVE_DOWNLOAD_ID:-}" ]; then
-        log "warning: the built-in Blackmagic download ID is for ${supported_resolve_version}; set RESOLVE_ZIP, RESOLVE_DOWNLOAD_URL, or RESOLVE_DOWNLOAD_ID for other versions"
-      fi
-    else
-      die "this repo is validated for ${resolve_product_name} ${supported_resolve_version} build ${supported_resolve_build}. Set ALLOW_UNSUPPORTED_RESOLVE=1 to experiment with ${resolve_version} build ${resolve_build}."
-    fi
-  fi
-
   if [ "${image}" != "${supported_image}" ]; then
     log "warning: default compatibility target uses ${supported_image}; RESOLVE_IMAGE=${image} is unvalidated"
   fi
@@ -208,30 +204,17 @@ check_existing_resolve_marker() {
   marker="$(resolve_marker_path)"
 
   if [ ! -f "${marker}" ]; then
-    if is_truthy "${allow_unsupported_resolve}"; then
-      log "warning: existing Resolve install has no ${marker}; using it because ALLOW_UNSUPPORTED_RESOLVE=1"
-      return 0
-    fi
-    die "existing Resolve install has no ${marker}, so setup cannot verify it is ${resolve_product_name} ${resolve_version} build ${resolve_build}. Set OVERWRITE_RESOLVE=1 to replace it, or use a different RESOLVE_DIR."
+    die "existing Resolve install has no ${marker}, so setup cannot verify it is ${resolve_product_name} ${resolve_version} build ${resolve_build}. Set OVERWRITE_RESOLVE=1 to replace it."
   fi
 
-  if grep -qx "resolve_version=${resolve_version}" "${marker}" && grep -qx "resolve_build=${resolve_build}" "${marker}"; then
+  if grep -qx "resolve_product=${resolve_product_name}" "${marker}" && grep -qx "resolve_version=${resolve_version}" "${marker}" && grep -qx "resolve_build=${resolve_build}" "${marker}"; then
     return 0
   fi
 
-  if is_truthy "${allow_unsupported_resolve}"; then
-    log "warning: existing Resolve marker does not match ${resolve_version} build ${resolve_build}: ${marker}"
-  else
-    die "existing Resolve marker does not match ${resolve_version} build ${resolve_build}: ${marker}. Use a matching RESOLVE_DIR or set ALLOW_UNSUPPORTED_RESOLVE=1 to experiment."
-  fi
+  die "existing Resolve marker does not match ${resolve_product_name} ${resolve_version} build ${resolve_build}: ${marker}. Set OVERWRITE_RESOLVE=1 to replace it with the selected edition."
 }
 
 get_blackmagic_download_url() {
-  if [ -n "${RESOLVE_DOWNLOAD_URL:-}" ]; then
-    printf '%s\n' "${RESOLVE_DOWNLOAD_URL}"
-    return 0
-  fi
-
   local payload
   payload='{"country":"us","origin":"www.blackmagicdesign.com"}'
 
@@ -526,7 +509,7 @@ install_launcher_files() {
   local template="${repo_dir}/templates/com.blackmagicdesign.resolve-docker.desktop.in"
 
   log "installing launcher to ${launcher_path}"
-  install -D -m 0755 "${repo_dir}/bin/davinci-resolve-docker.sh" "${launcher_path}"
+  install -D -m 0755 "${repo_dir}/bin/launch-resolve.sh" "${launcher_path}"
   mkdir -p "$(dirname "${desktop_path}")"
   sed "s|@LAUNCHER@|${launcher_path}|g" "${template}" > "${desktop_path}"
   chmod 0644 "${desktop_path}"
@@ -573,6 +556,7 @@ verify_container() {
   '
 }
 
+configure_resolve_edition
 validate_supported_target
 validate_shm_size
 check_host_session
@@ -621,7 +605,7 @@ Launch from app menu:
   DaVinci Resolve (Docker)
 
 Verify later:
-  ${repo_dir}/scripts/verify-davinci-resolve-docker.sh
+  ${repo_dir}/scripts/verify-resolve.sh
 EOF
 
 case "${launch_after_setup}" in
