@@ -87,6 +87,31 @@ Launch it later with:
 davinci-resolve-docker
 ```
 
+## Update Or Rebuild
+
+From the repository directory, update the repository and rebuild the container
+without launching Resolve:
+
+```bash
+git pull
+docker rm -f davincibox-docker
+RESOLVE_SHM_SIZE=16g ./scripts/setup-resolve.sh
+./scripts/verify-resolve.sh
+```
+
+To rebuild from the current checkout without updating the repository, omit
+`git pull`.
+
+To also reinstall or update Resolve itself:
+
+```bash
+docker rm -f davincibox-docker
+OVERWRITE_RESOLVE=1 RESOLVE_SHM_SIZE=16g ./quickstart.sh
+```
+
+Removing the container does not remove the isolated Resolve settings and
+project state stored in `~/.local/share/davinci-resolve-21-box-home`.
+
 ## Scripts
 
 Start with `./quickstart.sh`. Helper scripts are named by workflow:
