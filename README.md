@@ -241,6 +241,37 @@ RESOLVE_SHM_SIZE=16g ./scripts/setup-resolve.sh
 Recreate the container after kernel, Mesa, AMDGPU, ROCm, OpenCL, Docker device
 mapping, group, or `RESOLVE_SHM_SIZE` changes.
 
+### Improve UI Responsiveness
+
+Rebuilding the container can help if Resolve became sluggish after a host
+graphics, ROCm/OpenCL, group, or Docker configuration change. It refreshes the
+GPU device mappings and runtime packages and applies the recommended 16 GiB
+Docker shared-memory limit:
+
+```bash
+docker rm -f davincibox-docker
+RESOLVE_SHM_SIZE=16g ./scripts/setup-resolve.sh
+./scripts/verify-resolve.sh
+```
+
+The shared-memory size is a limit, not memory reserved immediately. Rebuilding
+does not remove the isolated Resolve settings and project state in
+`~/.local/share/davinci-resolve-21-box-home`.
+
+On Xorg/X11, the Qt MIT-SHM display path can also be tested for one launch:
+
+```bash
+QT_X11_NO_MITSHM=0 davinci-resolve-docker
+```
+
+The launcher disables MIT-SHM by default for compatibility. If enabling it
+causes visual corruption, crashes, or no improvement, return to the default by
+launching normally:
+
+```bash
+davinci-resolve-docker
+```
+
 If Resolve crashes after a graphics or runtime update, run the verifier and
 check the kernel log:
 
