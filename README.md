@@ -1,7 +1,7 @@
 # DaVinci Resolve on Linux with AMD GPUs
 
-This project runs **DaVinci Resolve Studio 21.0.2** on Linux by default,
-or the free **DaVinci Resolve 21.0.2** when selected, using a Docker-backed
+This project runs **DaVinci Resolve Studio 21.0.3** on Linux by default,
+or the free **DaVinci Resolve 21.0.3** when selected, using a Docker-backed
 Distrobox container.
 
 The container provides the Linux userspace that Resolve expects. Your AMD GPU
@@ -9,9 +9,29 @@ driver, `/dev/kfd`, `/dev/dri`, and ROCm/OpenCL runtime stay on the host.
 
 ## Requirements
 
+Blackmagic Design lists these minimum system requirements for DaVinci Resolve
+21.0.3 on Linux:
+
+- Rocky Linux 8.6.
+- 32 GB of system memory.
+- For monitoring, Blackmagic Design Desktop Video 12.9 or later.
+- A discrete GPU with at least 4 GB of VRAM.
+- At least 16 GB of VRAM for advanced AI tools.
+- At least 32 GB of system memory and 12 GB of VRAM for background rendering.
+- A GPU that supports OpenCL 1.2 or CUDA 12.8.
+- Official AMD drivers from your GPU manufacturer.
+- NVIDIA Studio driver 580.119.02 or newer.
+
+This project supplies a Fedora 39 container userspace, so Rocky Linux 8.6 is
+not required as the host operating system. The host still needs to meet the
+hardware and driver requirements above. The tested path is AMD with OpenCL;
+NVIDIA/CUDA is not currently validated by this project.
+
+For this container workflow, the host also needs:
+
 - A recent Linux desktop. Debian/Ubuntu-based, Arch-based, and Fedora-based
   hosts are the easiest paths.
-- An AMD GPU with working ROCm/OpenCL support on the host.
+- An AMD GPU with official drivers and working ROCm/OpenCL support on the host.
 - Docker, Distrobox, `clinfo`, `curl`, and `unzip`.
 - Xorg/X11 is recommended. Wayland may work, but X11 is the tested path.
 
@@ -19,6 +39,34 @@ This repo does not install AMD drivers or ROCm. Make sure the host can see your
 AMD OpenCL device before setting up Resolve.
 
 ## Quick Start
+
+### Install AMD Radeon Drivers And ROCm On Ubuntu/Kubuntu
+
+Download the AMD installer package that exactly matches the host Ubuntu release
+from the [AMD Linux driver page](https://www.amd.com/en/support/download/linux-drivers.html).
+Then replace `VERSION` below with the version in the downloaded file name:
+
+```bash
+cd ~/Downloads
+sudo apt update
+sudo apt install ./amdgpu-install_VERSION.deb
+sudo apt update
+sudo amdgpu-install -y --usecase=graphics,rocm
+sudo usermod -aG render,video "$USER"
+sudo reboot
+```
+
+The `.deb` installs `amdgpu-install` into `PATH`, so run
+`amdgpu-install`, not `./amdgpu-install`. The `-y` option makes the
+installation non-interactive. Do not add `--no-dkms` when the goal is to
+install AMD's host kernel driver. If Secure Boot is enabled, complete the MOK
+enrollment during reboot so the driver module can load.
+
+After rebooting, confirm that `clinfo` reports the AMD GPU before continuing.
+These commands are for Ubuntu/Kubuntu; use AMD's package and instructions that
+match the host distribution and release.
+
+### Install Container Tools
 
 Install the host tools with your distro package manager.
 
@@ -75,10 +123,15 @@ Then set up and launch Resolve Studio, which is the default:
 ./quickstart.sh
 ```
 
-To install the free Resolve edition instead:
+The free Resolve edition requires personal registration with Blackmagic Design.
+Register and download the official Linux ZIP from the
+[Blackmagic support page](https://www.blackmagicdesign.com/support/family/davinci-resolve-and-fusion),
+then either leave it in `~/Downloads` or pass its path explicitly:
 
 ```bash
-RESOLVE_EDITION=Resolve ./quickstart.sh
+RESOLVE_EDITION=Resolve \
+RESOLVE_ZIP="$HOME/Downloads/DaVinci_Resolve_21.0.3_Linux.zip" \
+./quickstart.sh
 ```
 
 Launch it later with:
@@ -129,8 +182,10 @@ Start with `./quickstart.sh`. Helper scripts are named by workflow:
 
 - Installs DaVinci Resolve Studio by default, or free DaVinci Resolve when
   `RESOLVE_EDITION=Resolve` is set.
-- Otherwise downloads the selected 21.0.2 Linux installer from Blackmagic
-  Design.
+- Uses an official archive supplied with `RESOLVE_ZIP`, bundled in the repo,
+  cached from an earlier run, or placed in `~/Downloads`.
+- Otherwise downloads the Studio 21.0.3 Linux installer from Blackmagic
+  Design. The free edition must be downloaded after personal registration.
 - Installs Resolve to `/opt/resolve`.
 - Creates the Docker-backed Distrobox container `davincibox-docker`.
 - Gives the container access to `/dev/kfd`, `/dev/dri`, and the host
@@ -273,8 +328,8 @@ Set these before running setup when needed:
 The default download cache is edition-specific:
 
 ```text
-~/.cache/davinci-resolve-docker/DaVinci_Resolve_Studio_21.0.2_Linux.zip
-~/.cache/davinci-resolve-docker/DaVinci_Resolve_21.0.2_Linux.zip
+~/.cache/davinci-resolve-docker/DaVinci_Resolve_Studio_21.0.3_Linux.zip
+~/.cache/davinci-resolve-docker/DaVinci_Resolve_21.0.3_Linux.zip
 ```
 
 Useful AMD references:

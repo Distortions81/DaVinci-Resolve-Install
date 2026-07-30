@@ -17,12 +17,12 @@ overwrite_resolve="${OVERWRITE_RESOLVE:-0}"
 launch_after_setup="${LAUNCH_AFTER_SETUP:-0}"
 resolve_edition="${RESOLVE_EDITION:-Studio}"
 
-supported_resolve_version="21.0.2"
-supported_resolve_build="4"
+supported_resolve_version="21.0.3"
+supported_resolve_build="7"
 supported_image="fedora:39"
 recommended_shm_bytes=$((16 * 1024 * 1024 * 1024))
-studio_download_id="ec36996cf2694986b514285fffa37e46"
-free_download_id="81eb9de9e7f14eca9da1f92376a39d70"
+studio_download_id="60c57e20c37d488882dfea5b8d15355a"
+free_download_id="a77754710e824036a6d77cd344df1be1"
 
 resolve_version="${supported_resolve_version}"
 resolve_build="${supported_resolve_build}"
@@ -250,6 +250,13 @@ download_resolve_zip() {
     return 0
   fi
 
+  local downloads_zip="${HOME}/Downloads/${resolve_zip_name}"
+  if [ -f "${downloads_zip}" ]; then
+    log "using Resolve archive from Downloads: ${downloads_zip}"
+    printf "%s\n" "${downloads_zip}"
+    return 0
+  fi
+
   mkdir -p "${resolve_download_dir}"
   local zip_path="${resolve_download_dir}/${resolve_zip_name}"
 
@@ -257,6 +264,10 @@ download_resolve_zip() {
     log "using cached Resolve archive: ${zip_path}"
     printf '%s\n' "${zip_path}"
     return 0
+  fi
+
+  if [ "${resolve_edition}" = "Resolve" ]; then
+    die "Blackmagic requires personal registration for the free edition. Download ${resolve_zip_name} from https://www.blackmagicdesign.com/support/family/davinci-resolve-and-fusion, then rerun with RESOLVE_ZIP=/path/to/${resolve_zip_name}."
   fi
 
   local url
