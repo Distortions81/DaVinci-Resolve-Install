@@ -234,7 +234,7 @@ container:
 
 ```bash
 docker rm -f davincibox-docker
-RESOLVE_SHM_SIZE=16g ./scripts/setup-resolve.sh
+RESOLVE_SHM_SIZE=1g ./scripts/setup-resolve.sh
 ./scripts/verify-resolve.sh
 ```
 
