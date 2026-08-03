@@ -10,7 +10,7 @@ resolve_xdg_data_home="${RESOLVE_XDG_DATA_HOME:-${resolve_home}/.local/share}"
 resolve_xdg_cache_home="${RESOLVE_XDG_CACHE_HOME:-${resolve_home}/.cache}"
 resolve_lock_dir="${RESOLVE_LOCK_DIR:-${resolve_home}/.davinci-resolve-docker.lock}"
 pulse_server="${PULSE_SERVER:-unix:/run/user/${uid}/pulse/native}"
-recommended_shm_bytes=$((16 * 1024 * 1024 * 1024))
+recommended_shm_bytes=$((1 * 1024 * 1024 * 1024))
 
 audio_socket_path() {
   case "${pulse_server}" in
@@ -34,7 +34,7 @@ container_shm="$(docker inspect -f '{{.HostConfig.ShmSize}}' "${container}")"
 docker inspect -f '  name={{.Name}} running={{.State.Running}} image={{.Config.Image}} groups={{json .HostConfig.GroupAdd}} devices={{json .HostConfig.Devices}}' "${container}"
 echo "  shm=${container_shm} bytes"
 if [[ "${container_shm}" =~ ^[0-9]+$ ]] && [ "${container_shm}" -lt "${recommended_shm_bytes}" ]; then
-  echo "  warning: /dev/shm is below the recommended 16 GiB. Recreate the container with RESOLVE_SHM_SIZE=16g."
+  echo "  warning: /dev/shm is below the recommended 1 GiB. Recreate the container with RESOLVE_SHM_SIZE=1g."
 fi
 
 echo

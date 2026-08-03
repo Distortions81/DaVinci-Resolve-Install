@@ -9,7 +9,7 @@ image="${RESOLVE_IMAGE:-fedora:39}"
 resolve_dir="${RESOLVE_DIR:-/opt/resolve}"
 container_user="${RESOLVE_USER:-$(id -un)}"
 resolve_home="${RESOLVE_HOME:-${HOME}/.local/share/davinci-resolve-21-box-home}"
-resolve_shm_size="${RESOLVE_SHM_SIZE:-16g}"
+resolve_shm_size="${RESOLVE_SHM_SIZE:-1g}"
 install_launcher="${INSTALL_LAUNCHER:-1}"
 patch_resolve_libs="${PATCH_RESOLVE_LIBS:-1}"
 download_resolve="${DOWNLOAD_RESOLVE:-auto}"
@@ -20,7 +20,7 @@ resolve_edition="${RESOLVE_EDITION:-Studio}"
 supported_resolve_version="21.0.3"
 supported_resolve_build="7"
 supported_image="fedora:39"
-recommended_shm_bytes=$((16 * 1024 * 1024 * 1024))
+recommended_shm_bytes=$((1 * 1024 * 1024 * 1024))
 studio_download_id="60c57e20c37d488882dfea5b8d15355a"
 free_download_id="a77754710e824036a6d77cd344df1be1"
 
@@ -136,7 +136,7 @@ validate_supported_target() {
 
 validate_shm_size() {
   if ! [[ "${resolve_shm_size}" =~ ^[0-9]+([kKmMgG])?$ ]]; then
-    die "invalid RESOLVE_SHM_SIZE value: ${resolve_shm_size}. Use a Docker size such as 16g or 17179869184."
+    die "invalid RESOLVE_SHM_SIZE value: ${resolve_shm_size}. Use a Docker size such as 1g or 1073741824."
   fi
 }
 
@@ -443,7 +443,7 @@ create_container() {
     if [[ "${current_shm}" =~ ^[0-9]+$ ]]; then
       log "container shared memory: ${current_shm} bytes"
       if [ "${current_shm}" -lt "${recommended_shm_bytes}" ]; then
-        log "warning: container /dev/shm is below the recommended 16 GiB. Recreate the container to apply RESOLVE_SHM_SIZE=${resolve_shm_size}."
+        log "warning: container /dev/shm is below the recommended 1 GiB. Recreate the container to apply RESOLVE_SHM_SIZE=${resolve_shm_size}."
       fi
     else
       log "warning: could not inspect container shared memory size"

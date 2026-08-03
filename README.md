@@ -148,7 +148,7 @@ without launching Resolve:
 ```bash
 git pull
 docker rm -f davincibox-docker
-RESOLVE_SHM_SIZE=16g ./scripts/setup-resolve.sh
+RESOLVE_SHM_SIZE=1g ./scripts/setup-resolve.sh
 ./scripts/verify-resolve.sh
 ```
 
@@ -159,7 +159,7 @@ To also reinstall or update Resolve itself:
 
 ```bash
 docker rm -f davincibox-docker
-OVERWRITE_RESOLVE=1 RESOLVE_SHM_SIZE=16g ./quickstart.sh
+OVERWRITE_RESOLVE=1 RESOLVE_SHM_SIZE=1g ./quickstart.sh
 ```
 
 Removing the container does not remove the isolated Resolve settings and
@@ -190,7 +190,7 @@ Start with `./quickstart.sh`. Helper scripts are named by workflow:
 - Creates the Docker-backed Distrobox container `davincibox-docker`.
 - Gives the container access to `/dev/kfd`, `/dev/dri`, and the host
   `render`/`video` groups.
-- Sets Docker `/dev/shm` to 16 GB.
+- Sets Docker `/dev/shm` to 1 GB.
 - Points the container OpenCL ICD at the host AMD OpenCL library.
 - Keeps Resolve's settings and project-library state in an isolated home at
   `~/.local/share/davinci-resolve-21-box-home`.
@@ -211,7 +211,7 @@ Expected results:
 
 - `/dev/kfd` is readable inside the container.
 - At least one `/dev/dri/renderD*` node is readable inside the container.
-- Docker `/dev/shm` is at least 16 GiB.
+- Docker `/dev/shm` is at least 1 GiB.
 - `clinfo` inside the container shows an AMD GPU device.
 - `ldd /opt/resolve/bin/resolve` reports no missing libraries.
 - Resolve's HOME/XDG paths point at the isolated state tree.
@@ -245,12 +245,12 @@ mapping, group, or `RESOLVE_SHM_SIZE` changes.
 
 Rebuilding the container can help if Resolve became sluggish after a host
 graphics, ROCm/OpenCL, group, or Docker configuration change. It refreshes the
-GPU device mappings and runtime packages and applies the recommended 16 GiB
+GPU device mappings and runtime packages and applies the recommended 1 GiB
 Docker shared-memory limit:
 
 ```bash
 docker rm -f davincibox-docker
-RESOLVE_SHM_SIZE=16g ./scripts/setup-resolve.sh
+RESOLVE_SHM_SIZE=1g ./scripts/setup-resolve.sh
 ./scripts/verify-resolve.sh
 ```
 
@@ -307,14 +307,14 @@ To replace the current Resolve install with the selected edition from this repo:
 
 ```bash
 docker rm -f davincibox-docker
-OVERWRITE_RESOLVE=1 RESOLVE_SHM_SIZE=16g ./quickstart.sh
+OVERWRITE_RESOLVE=1 RESOLVE_SHM_SIZE=1g ./quickstart.sh
 ```
 
 To switch to the free Resolve edition:
 
 ```bash
 docker rm -f davincibox-docker
-RESOLVE_EDITION=Resolve OVERWRITE_RESOLVE=1 RESOLVE_SHM_SIZE=16g ./quickstart.sh
+RESOLVE_EDITION=Resolve OVERWRITE_RESOLVE=1 RESOLVE_SHM_SIZE=1g ./quickstart.sh
 ```
 
 ## Project Libraries
@@ -351,7 +351,7 @@ Set these before running setup when needed:
 | `RESOLVE_DIR` | `/opt/resolve` | Resolve install path on the host |
 | `RESOLVE_HOME` | `~/.local/share/davinci-resolve-21-box-home` | Isolated Resolve HOME/XDG state |
 | `RESOLVE_AUDIO_MODE` | `system` | `system`, `auto`, `pulse`, or `null` audio mode |
-| `RESOLVE_SHM_SIZE` | `16g` | Docker `/dev/shm` size at container creation |
+| `RESOLVE_SHM_SIZE` | `1g` | Docker `/dev/shm` size at container creation |
 | `RESOLVE_ZIP` | unset | Local official zip for the selected edition |
 | `OVERWRITE_RESOLVE` | `0` | Replace an existing `/opt/resolve` tree |
 | `ROCM_OPENCL_LIB` | auto-detected | Host `libamdocl64.so` path |
