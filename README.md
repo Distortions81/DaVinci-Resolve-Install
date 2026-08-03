@@ -190,7 +190,12 @@ Start with `./quickstart.sh`. Helper scripts are named by workflow:
 - Creates the Docker-backed Distrobox container `davincibox-docker`.
 - Gives the container access to `/dev/kfd`, `/dev/dri`, and the host
   `render`/`video` groups.
-- Sets Docker `/dev/shm` to 1 GB.
+- Requests a 1 GB Docker `/dev/shm`; when Distrobox uses host IPC, Resolve
+  instead sees the host's shared-memory filesystem.
+- Enables AMD's unconfined seccomp mode, unlimited locked memory, a 1,048,576
+  file-descriptor limit.
+- Optionally bind-mounts `RESOLVE_CACHE_DIR` at `/var/cache/davinci-resolve` for
+  cache, proxy, and optimized-media storage.
 - Points the container OpenCL ICD at the host AMD OpenCL library.
 - Keeps Resolve's settings and project-library state in an isolated home at
   `~/.local/share/davinci-resolve-21-box-home`.
@@ -211,7 +216,8 @@ Expected results:
 
 - `/dev/kfd` is readable inside the container.
 - At least one `/dev/dri/renderD*` node is readable inside the container.
-- Docker `/dev/shm` is at least 1 GiB.
+- The actual `/dev/shm` visible inside the container is at least 1 GiB; the
+  verifier distinguishes host IPC from Docker's requested private size.
 - `clinfo` inside the container shows an AMD GPU device.
 - `ldd /opt/resolve/bin/resolve` reports no missing libraries.
 - Resolve's HOME/XDG paths point at the isolated state tree.
@@ -245,8 +251,8 @@ mapping, group, or `RESOLVE_SHM_SIZE` changes.
 
 Rebuilding the container can help if Resolve became sluggish after a host
 graphics, ROCm/OpenCL, group, or Docker configuration change. It refreshes the
-GPU device mappings and runtime packages and applies the recommended 1 GiB
-Docker shared-memory limit:
+GPU device mappings and runtime packages and applies the performance-oriented
+Docker limits:
 
 ```bash
 docker rm -f davincibox-docker
@@ -254,19 +260,39 @@ RESOLVE_SHM_SIZE=1g ./scripts/setup-resolve.sh
 ./scripts/verify-resolve.sh
 ```
 
-The shared-memory size is a limit, not memory reserved immediately. Rebuilding
-does not remove the isolated Resolve settings and project state in
-`~/.local/share/davinci-resolve-21-box-home`.
+When Distrobox creates the container with host IPC, `RESOLVE_SHM_SIZE` is only
+the requested private Docker size; Resolve sees the host `/dev/shm` instead.
+The verifier reports both values.
 
-On Xorg/X11, the Qt MIT-SHM display path can also be tested for one launch:
+For cache-heavy timelines, bind a cache directory from a fast SSD or NVMe that
+is separate from the source-media drive:
 
 ```bash
-QT_X11_NO_MITSHM=0 davinci-resolve-docker
+docker rm -f davincibox-docker
+RESOLVE_CACHE_DIR=/path/on/separate/nvme/ResolveCache \
+RESOLVE_SHM_SIZE=1g \
+./scripts/setup-resolve.sh
+./scripts/verify-resolve.sh
 ```
 
-The launcher disables MIT-SHM by default for compatibility. If enabling it
-causes visual corruption, crashes, or no improvement, return to the default by
-launching normally:
+Then select `/var/cache/davinci-resolve` in Resolve for cache files, proxy
+media, and optimized media. Treat this directory as disposable cache storage;
+keep Resolve project libraries on a local native Linux filesystem.
+
+Rebuilding does not remove the isolated Resolve settings and project state in
+`~/.local/share/davinci-resolve-21-box-home`.
+
+On Xorg/X11, the launcher enables Qt's MIT-SHM display path by default. This
+produced a substantial improvement in Resolve UI responsiveness on the tested
+AMD/X11 system and is the first option to check when the interface feels
+sluggish. If it causes visual corruption or crashes on another system, disable
+it for one launch:
+
+```bash
+QT_X11_NO_MITSHM=1 davinci-resolve-docker
+```
+
+To return to the performance-oriented default, launch normally:
 
 ```bash
 davinci-resolve-docker
@@ -352,9 +378,11 @@ Set these before running setup when needed:
 | `RESOLVE_HOME` | `~/.local/share/davinci-resolve-21-box-home` | Isolated Resolve HOME/XDG state |
 | `RESOLVE_AUDIO_MODE` | `system` | `system`, `auto`, `pulse`, or `null` audio mode |
 | `RESOLVE_SHM_SIZE` | `1g` | Docker `/dev/shm` size at container creation |
+| `RESOLVE_CACHE_DIR` | unset | Host cache directory mounted at `/var/cache/davinci-resolve` |
 | `RESOLVE_ZIP` | unset | Local official zip for the selected edition |
 | `OVERWRITE_RESOLVE` | `0` | Replace an existing `/opt/resolve` tree |
 | `ROCM_OPENCL_LIB` | auto-detected | Host `libamdocl64.so` path |
+| `QT_X11_NO_MITSHM` | `0` | Set to `1` at launch to disable Qt MIT-SHM |
 
 The default download cache is edition-specific:
 

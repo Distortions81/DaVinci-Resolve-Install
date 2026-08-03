@@ -264,7 +264,7 @@ docker exec -u "${container_user}" \
   -e PULSE_SERVER="${pulse_server}" \
   "${docker_env_args[@]}" \
   -e DBUS_SESSION_BUS_ADDRESS="${dbus_session}" \
-  -e QT_X11_NO_MITSHM="${QT_X11_NO_MITSHM:-1}" \
+  -e QT_X11_NO_MITSHM="${QT_X11_NO_MITSHM:-0}" \
   -w /opt/resolve \
   "${container}" \
   /opt/resolve/bin/resolve "$@"

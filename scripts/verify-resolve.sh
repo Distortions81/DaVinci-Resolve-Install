@@ -30,11 +30,30 @@ if [ "$(docker inspect -f '{{.State.Running}}' "${container}")" != "true" ]; the
 fi
 
 echo "Container:"
-container_shm="$(docker inspect -f '{{.HostConfig.ShmSize}}' "${container}")"
+container_ipc="$(docker inspect -f '{{.HostConfig.IpcMode}}' "${container}")"
+requested_shm="$(docker inspect -f '{{.HostConfig.ShmSize}}' "${container}")"
+actual_shm="$(docker exec "${container}" df -B1 --output=size /dev/shm | awk 'NR == 2 { print $1 }')"
 docker inspect -f '  name={{.Name}} running={{.State.Running}} image={{.Config.Image}} groups={{json .HostConfig.GroupAdd}} devices={{json .HostConfig.Devices}}' "${container}"
-echo "  shm=${container_shm} bytes"
-if [[ "${container_shm}" =~ ^[0-9]+$ ]] && [ "${container_shm}" -lt "${recommended_shm_bytes}" ]; then
+docker inspect -f '  ipc={{.HostConfig.IpcMode}} security={{json .HostConfig.SecurityOpt}} ulimits={{json .HostConfig.Ulimits}}' "${container}"
+echo "  requested_shm=${requested_shm} bytes"
+echo "  actual_shm=${actual_shm} bytes"
+if [ "${container_ipc}" = "host" ]; then
+  echo "  note: host IPC is active, so /dev/shm uses the host tmpfs rather than the requested private size"
+elif [[ "${actual_shm}" =~ ^[0-9]+$ ]] && [ "${actual_shm}" -lt "${recommended_shm_bytes}" ]; then
   echo "  warning: /dev/shm is below the recommended 1 GiB. Recreate the container with RESOLVE_SHM_SIZE=1g."
+fi
+
+cache_source="$(docker inspect -f '{{range .Mounts}}{{if eq .Destination "/var/cache/davinci-resolve"}}{{.Source}}{{end}}{{end}}' "${container}")"
+if [ -n "${cache_source}" ]; then
+  echo "  resolve_cache=${cache_source} -> /var/cache/davinci-resolve"
+  if docker exec -u "${container_user}" "${container}" test -w /var/cache/davinci-resolve; then
+    echo "  resolve_cache_writable=yes"
+  else
+    echo "  error: Resolve user cannot write /var/cache/davinci-resolve" >&2
+    exit 1
+  fi
+else
+  echo "  resolve_cache=not configured"
 fi
 
 echo

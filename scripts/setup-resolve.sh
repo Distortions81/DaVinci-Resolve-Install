@@ -10,6 +10,8 @@ resolve_dir="${RESOLVE_DIR:-/opt/resolve}"
 container_user="${RESOLVE_USER:-$(id -un)}"
 resolve_home="${RESOLVE_HOME:-${HOME}/.local/share/davinci-resolve-21-box-home}"
 resolve_shm_size="${RESOLVE_SHM_SIZE:-1g}"
+resolve_cache_dir="${RESOLVE_CACHE_DIR:-}"
+resolve_cache_mount="/var/cache/davinci-resolve"
 install_launcher="${INSTALL_LAUNCHER:-1}"
 patch_resolve_libs="${PATCH_RESOLVE_LIBS:-1}"
 download_resolve="${DOWNLOAD_RESOLVE:-auto}"
@@ -138,6 +140,19 @@ validate_shm_size() {
   if ! [[ "${resolve_shm_size}" =~ ^[0-9]+([kKmMgG])?$ ]]; then
     die "invalid RESOLVE_SHM_SIZE value: ${resolve_shm_size}. Use a Docker size such as 1g or 1073741824."
   fi
+}
+
+validate_cache_dir() {
+  [ -n "${resolve_cache_dir}" ] || return 0
+
+  case "${resolve_cache_dir}" in
+    /*) ;;
+    *) die "RESOLVE_CACHE_DIR must be an absolute host path: ${resolve_cache_dir}" ;;
+  esac
+
+  mkdir -p -- "${resolve_cache_dir}" || die "could not create RESOLVE_CACHE_DIR: ${resolve_cache_dir}"
+  [ -d "${resolve_cache_dir}" ] || die "RESOLVE_CACHE_DIR is not a directory: ${resolve_cache_dir}"
+  [ -w "${resolve_cache_dir}" ] || die "RESOLVE_CACHE_DIR is not writable: ${resolve_cache_dir}"
 }
 
 check_host_session() {
@@ -452,21 +467,30 @@ create_container() {
   fi
 
   local render_gid video_gid flags
+  local -a create_args
   render_gid="$(group_gid render)"
   [ -n "${render_gid}" ] || die "host group 'render' does not exist"
   video_gid="$(group_gid video || true)"
 
-  flags="--device /dev/kfd --device /dev/dri --group-add ${render_gid} --shm-size=${resolve_shm_size}"
+  flags="--device /dev/kfd --device /dev/dri --group-add ${render_gid} --shm-size=${resolve_shm_size} --security-opt seccomp=unconfined --ulimit memlock=-1:-1 --ulimit nofile=1048576:1048576"
   if [ -n "${video_gid}" ] && [ "${video_gid}" != "${render_gid}" ]; then
     flags="${flags} --group-add ${video_gid}"
   fi
 
+  create_args=(
+    --image "${image}"
+    --name "${container}"
+    --additional-flags "${flags}"
+    --yes
+  )
+  if [ -n "${resolve_cache_dir}" ]; then
+    create_args+=(--volume "${resolve_cache_dir}:${resolve_cache_mount}:rw")
+    log "mounting Resolve cache ${resolve_cache_dir} at ${resolve_cache_mount}"
+  fi
+
   log "creating Docker-backed Distrobox '${container}' from ${image} with /dev/shm=${resolve_shm_size}"
   if ! DBX_CONTAINER_MANAGER=docker distrobox create \
-    --image "${image}" \
-    --name "${container}" \
-    --additional-flags "${flags}" \
-    --yes; then
+    "${create_args[@]}"; then
     docker container inspect "${container}" >/dev/null 2>&1 || die "Distrobox create failed"
     log "Distrobox create returned non-zero after creating the Docker container; continuing"
   fi
@@ -570,6 +594,7 @@ verify_container() {
 configure_resolve_edition
 validate_supported_target
 validate_shm_size
+validate_cache_dir
 check_host_session
 need_cmd docker
 need_cmd distrobox
