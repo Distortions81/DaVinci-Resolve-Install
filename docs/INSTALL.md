@@ -3,6 +3,40 @@
 This guide prepares a Linux host for DaVinci Resolve Container. Return to the
 [Quick Start](../README.md#quick-start) once the host checks pass.
 
+## Rebuild After GPU Stack Updates
+
+> [!IMPORTANT]
+> Rebuild the container after updating your GPU driver, Mesa, ROCm, OpenCL,
+> CUDA, or NVIDIA Container Toolkit. The container captures parts of the host
+> GPU stack when it is created, so an existing container may no longer match
+> the updated host libraries.
+
+For AMD, update the repository, remove the old container, recreate it, and run
+the verifier:
+
+```bash
+git pull
+docker rm -f davincibox-docker
+OVERWRITE_RESOLVE=1 RESOLVE_SHM_SIZE=1g ./scripts/setup-resolve.sh
+./scripts/verify-resolve.sh
+```
+
+For NVIDIA, use its separate container and select the NVIDIA backend:
+
+```bash
+git pull
+docker rm -f davincibox-nvidia-docker
+OVERWRITE_RESOLVE=1 RESOLVE_GPU=nvidia RESOLVE_SHM_SIZE=1g ./scripts/setup-resolve.sh
+RESOLVE_GPU=nvidia ./scripts/verify-resolve.sh
+```
+
+`OVERWRITE_RESOLVE=1` makes this rebuild refresh the existing `/opt/resolve`
+installation instead of reusing it. Normal setup keeps the safer default of
+`OVERWRITE_RESOLVE=0`.
+
+Removing the container does not remove Resolve settings or project-library
+state because those are stored in the backend-specific isolated home directory.
+
 ## Resolve Requirements
 
 Blackmagic Design lists these minimum requirements for DaVinci Resolve 21.0.4
