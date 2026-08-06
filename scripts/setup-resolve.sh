@@ -19,12 +19,12 @@ overwrite_resolve="${OVERWRITE_RESOLVE:-0}"
 launch_after_setup="${LAUNCH_AFTER_SETUP:-0}"
 resolve_edition="${RESOLVE_EDITION:-Studio}"
 
-supported_resolve_version="21.0.3"
-supported_resolve_build="7"
+supported_resolve_version="21.0.4"
+supported_resolve_build="5"
 supported_image="fedora:39"
 recommended_shm_bytes=$((1 * 1024 * 1024 * 1024))
-studio_download_id="60c57e20c37d488882dfea5b8d15355a"
-free_download_id="a77754710e824036a6d77cd344df1be1"
+studio_download_id="f6af677f3e3741f59a014b54445bd39e"
+free_download_id="651bbe286f4c4544b4ded9b343638f60"
 
 resolve_version="${supported_resolve_version}"
 resolve_build="${supported_resolve_build}"
