@@ -1,4 +1,16 @@
-# DaVinci Resolve Container for Linux
+<h1 align="center">DaVinci Resolve Container for Linux</h1>
+
+<p align="center">
+  <img src="docs/assets/readme-hero.jpg" width="1280" alt="DaVinci Resolve Container for Linux with AMD ROCm/OpenCL and NVIDIA CUDA/OpenCL">
+</p>
+
+<h2 align="center">
+  <a href="docs/INSTALL.md">Installation Guide — Start Here</a>
+</h2>
+
+<p align="center">
+  <strong>Ubuntu · Debian · Fedora · Arch Linux · AMD · NVIDIA</strong>
+</p>
 
 Run **DaVinci Resolve Studio or Free 21.0.4** on Ubuntu, Fedora, Arch Linux,
 Kubuntu, and other Linux desktops using a Docker-backed Distrobox container.
@@ -34,8 +46,8 @@ replacing the graphics drivers on your host.
 | Desktop session    | Xorg/X11 tested; Wayland may work but is not yet validated            |
 
 Blackmagic Design's Linux requirements still apply, including a supported
-discrete GPU and sufficient RAM/VRAM. See the
-[installation guide](docs/INSTALL.md) for the complete prerequisites.
+discrete GPU and sufficient RAM/VRAM. The installation guide covers complete
+distro-specific host, AMD ROCm/OpenCL, and NVIDIA Container Toolkit setup.
 
 ## Quick Start
 
