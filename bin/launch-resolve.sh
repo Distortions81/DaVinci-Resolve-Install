@@ -1,17 +1,14 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-container="${RESOLVE_CONTAINER:-davincibox-docker}"
+container="${RESOLVE_CONTAINER:-}"
 container_user="${RESOLVE_USER:-$(id -un)}"
 resolve_dir="${RESOLVE_DIR:-/opt/resolve}"
 uid="$(id -u)"
 display="${DISPLAY:-:0}"
 xauthority="${XAUTHORITY:-$HOME/.Xauthority}"
-resolve_home="${RESOLVE_HOME:-${HOME}/.local/share/davinci-resolve-21-box-home}"
-resolve_xdg_config_home="${RESOLVE_XDG_CONFIG_HOME:-${resolve_home}/.config}"
-resolve_xdg_data_home="${RESOLVE_XDG_DATA_HOME:-${resolve_home}/.local/share}"
-resolve_xdg_cache_home="${RESOLVE_XDG_CACHE_HOME:-${resolve_home}/.cache}"
-resolve_lock_dir="${RESOLVE_LOCK_DIR:-${resolve_home}/.davinci-resolve-docker.lock}"
+resolve_home="${RESOLVE_HOME:-}"
+gpu_backend="${RESOLVE_GPU:-auto}"
 xdg_runtime="/run/user/${uid}"
 pulse_server="${PULSE_SERVER:-unix:${xdg_runtime}/pulse/native}"
 dbus_session="${DBUS_SESSION_BUS_ADDRESS:-unix:path=${xdg_runtime}/bus}"
@@ -30,6 +27,52 @@ need_absolute_path() {
     *) die "$1 must be an absolute path: $2" ;;
   esac
 }
+
+host_has_amd_opencl() {
+  command -v clinfo >/dev/null 2>&1 || return 1
+  clinfo 2>/dev/null | awk '
+    function flush_device() {
+      if (device_vendor_amd && device_gpu) found = 1
+      device_vendor_amd = 0
+      device_gpu = 0
+    }
+    /^[[:space:]]*Device Name/ { flush_device() }
+    /Device Vendor/ && ($0 ~ /AMD|Advanced Micro Devices/) { device_vendor_amd = 1 }
+    /Device Type/ && ($0 ~ /GPU/) { device_gpu = 1 }
+    END { flush_device(); exit !found }
+  '
+}
+
+select_gpu_backend() {
+  case "${gpu_backend,,}" in
+    auto)
+      if host_has_amd_opencl; then
+        gpu_backend="amd"
+      elif command -v nvidia-smi >/dev/null 2>&1 && nvidia-smi -L >/dev/null 2>&1; then
+        gpu_backend="nvidia"
+      else
+        die "could not auto-detect an AMD or NVIDIA GPU. Set RESOLVE_GPU=amd or RESOLVE_GPU=nvidia after fixing the host driver."
+      fi
+      ;;
+    amd|rocm|opencl) gpu_backend="amd" ;;
+    nvidia|cuda) gpu_backend="nvidia" ;;
+    *) die "invalid RESOLVE_GPU value: ${gpu_backend}. Use auto, amd, or nvidia." ;;
+  esac
+
+  if [ "${gpu_backend}" = "nvidia" ]; then
+    container="${container:-davincibox-nvidia-docker}"
+    resolve_home="${resolve_home:-${HOME}/.local/share/davinci-resolve-21-nvidia-box-home}"
+  else
+    container="${container:-davincibox-docker}"
+    resolve_home="${resolve_home:-${HOME}/.local/share/davinci-resolve-21-box-home}"
+  fi
+}
+
+select_gpu_backend
+resolve_xdg_config_home="${RESOLVE_XDG_CONFIG_HOME:-${resolve_home}/.config}"
+resolve_xdg_data_home="${RESOLVE_XDG_DATA_HOME:-${resolve_home}/.local/share}"
+resolve_xdg_cache_home="${RESOLVE_XDG_CACHE_HOME:-${resolve_home}/.cache}"
+resolve_lock_dir="${RESOLVE_LOCK_DIR:-${resolve_home}/.davinci-resolve-docker.lock}"
 
 case "${1:-}" in
   --audio=*)
@@ -208,8 +251,12 @@ resolve_amd_opencl_lib() {
   printf '%s\n' "${path}"
 }
 
-host_opencl="$(resolve_amd_opencl_lib)"
-container_opencl="/run/host${host_opencl}"
+host_opencl=""
+container_opencl=""
+if [ "${gpu_backend}" = "amd" ]; then
+  host_opencl="$(resolve_amd_opencl_lib)"
+  container_opencl="/run/host${host_opencl}"
+fi
 
 need_absolute_path "RESOLVE_HOME" "${resolve_home}"
 need_absolute_path "RESOLVE_XDG_CONFIG_HOME" "${resolve_xdg_config_home}"
@@ -226,7 +273,12 @@ configure_audio
 acquire_lock
 
 if ! docker container inspect "${container}" >/dev/null 2>&1; then
-  die "container '${container}' does not exist. Run ./quickstart.sh from the repo first."
+  die "container '${container}' does not exist. Run RESOLVE_GPU=${gpu_backend} ./quickstart.sh from the repo first."
+fi
+
+configured_backend="$(docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "${container}" | sed -n 's/^RESOLVE_GPU_BACKEND=//p' | tail -n 1)"
+if [ -n "${configured_backend}" ] && [ "${configured_backend}" != "${gpu_backend}" ]; then
+  die "container '${container}' uses GPU backend ${configured_backend}, but ${gpu_backend} was selected."
 fi
 
 if [ "$(docker inspect -f '{{.State.Running}}' "${container}")" != "true" ]; then
@@ -235,6 +287,7 @@ fi
 
 docker exec -u root \
   -e RESOLVE_DIR_IN_CONTAINER="/run/host${resolve_dir}" \
+  -e GPU_BACKEND="${gpu_backend}" \
   -e CONTAINER_OPENCL="${container_opencl}" \
   "${container}" bash -lc '
   set -e
@@ -244,7 +297,16 @@ docker exec -u root \
   fi
   ln -sfn "${RESOLVE_DIR_IN_CONTAINER}" /opt/resolve
   mkdir -p /etc/OpenCL/vendors
-  printf "%s\n" "${CONTAINER_OPENCL}" > /etc/OpenCL/vendors/amdocl64-host.icd
+  case "${GPU_BACKEND}" in
+    amd)
+      printf "%s\n" "${CONTAINER_OPENCL}" > /etc/OpenCL/vendors/amdocl64-host.icd
+      rm -f /etc/OpenCL/vendors/nvidia-host.icd
+      ;;
+    nvidia)
+      printf "%s\n" "libnvidia-opencl.so.1" > /etc/OpenCL/vendors/nvidia-host.icd
+      rm -f /etc/OpenCL/vendors/amdocl64-host.icd
+      ;;
+  esac
 '
 
 set +e

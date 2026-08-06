@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Blackmagic Design support
+    url: https://www.blackmagicdesign.com/support/family/davinci-resolve-and-fusion
+    about: Use official support for Resolve application or licensing problems unrelated to this container.

@@ -4,14 +4,15 @@ set -euo pipefail
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 repo_dir="$(cd -- "${script_dir}/.." && pwd)"
 
-container="${RESOLVE_CONTAINER:-davincibox-docker}"
+container="${RESOLVE_CONTAINER:-}"
 image="${RESOLVE_IMAGE:-fedora:39}"
 resolve_dir="${RESOLVE_DIR:-/opt/resolve}"
 container_user="${RESOLVE_USER:-$(id -un)}"
-resolve_home="${RESOLVE_HOME:-${HOME}/.local/share/davinci-resolve-21-box-home}"
+resolve_home="${RESOLVE_HOME:-}"
 resolve_shm_size="${RESOLVE_SHM_SIZE:-1g}"
 resolve_cache_dir="${RESOLVE_CACHE_DIR:-}"
 resolve_cache_mount="/var/cache/davinci-resolve"
+gpu_backend="${RESOLVE_GPU:-auto}"
 install_launcher="${INSTALL_LAUNCHER:-1}"
 patch_resolve_libs="${PATCH_RESOLVE_LIBS:-1}"
 download_resolve="${DOWNLOAD_RESOLVE:-auto}"
@@ -23,6 +24,7 @@ supported_resolve_version="21.0.4"
 supported_resolve_build="5"
 supported_image="fedora:39"
 recommended_shm_bytes=$((1 * 1024 * 1024 * 1024))
+minimum_nvidia_driver="580.119.02"
 studio_download_id="f6af677f3e3741f59a014b54445bd39e"
 free_download_id="651bbe286f4c4544b4ded9b343638f60"
 
@@ -36,7 +38,8 @@ resolve_download_id=""
 resolve_download_dir="${RESOLVE_DOWNLOAD_DIR:-${XDG_CACHE_HOME:-${HOME}/.cache}/davinci-resolve-docker}"
 
 launcher_path="${HOME}/.local/bin/davinci-resolve-docker"
-desktop_path="${HOME}/.local/share/applications/com.blackmagicdesign.resolve-docker.desktop"
+desktop_path=""
+desktop_name=""
 
 packages=(
   alsa-lib
@@ -161,6 +164,70 @@ check_host_session() {
   fi
 }
 
+host_has_amd_opencl() {
+  command -v clinfo >/dev/null 2>&1 || return 1
+
+  clinfo 2>/dev/null | awk '
+    function flush_device() {
+      if (device_vendor_amd && device_gpu) {
+        found = 1
+      }
+      device_vendor_amd = 0
+      device_gpu = 0
+    }
+    /^[[:space:]]*Device Name/ { flush_device() }
+    /Device Vendor/ && ($0 ~ /AMD|Advanced Micro Devices/) { device_vendor_amd = 1 }
+    /Device Type/ && ($0 ~ /GPU/) { device_gpu = 1 }
+    END { flush_device(); exit !found }
+  '
+}
+
+host_has_nvidia_gpu() {
+  command -v nvidia-smi >/dev/null 2>&1 && nvidia-smi -L >/dev/null 2>&1
+}
+
+select_gpu_backend() {
+  case "${gpu_backend,,}" in
+    auto)
+      if host_has_amd_opencl; then
+        gpu_backend="amd"
+      elif host_has_nvidia_gpu; then
+        gpu_backend="nvidia"
+      else
+        die "could not auto-detect a supported GPU. For AMD, make sure clinfo reports an AMD GPU. For NVIDIA, make sure nvidia-smi works."
+      fi
+      ;;
+    amd|rocm|opencl)
+      gpu_backend="amd"
+      ;;
+    nvidia|cuda)
+      gpu_backend="nvidia"
+      ;;
+    *)
+      die "invalid RESOLVE_GPU value: ${gpu_backend}. Use auto, amd, or nvidia."
+      ;;
+  esac
+
+  log "selected GPU backend: ${gpu_backend}"
+}
+
+configure_gpu_defaults() {
+  case "${gpu_backend}" in
+    amd)
+      container="${container:-davincibox-docker}"
+      resolve_home="${resolve_home:-${HOME}/.local/share/davinci-resolve-21-box-home}"
+      desktop_path="${HOME}/.local/share/applications/com.blackmagicdesign.resolve-docker.desktop"
+      desktop_name="DaVinci Resolve (Docker)"
+      ;;
+    nvidia)
+      container="${container:-davincibox-nvidia-docker}"
+      resolve_home="${resolve_home:-${HOME}/.local/share/davinci-resolve-21-nvidia-box-home}"
+      desktop_path="${HOME}/.local/share/applications/com.blackmagicdesign.resolve-nvidia-docker.desktop"
+      desktop_name="DaVinci Resolve (Docker - NVIDIA)"
+      ;;
+  esac
+}
+
 check_host_amd_opencl() {
   log "checking host AMD OpenCL visibility"
 
@@ -188,6 +255,25 @@ check_host_amd_opencl() {
   fi
 
   printf '%s\n' "${output}" | grep -E 'Platform Name|Device Name|Board Name|Device Vendor|Device Type|Driver Version' | sed -n '1,16p' >&2 || true
+}
+
+check_host_nvidia() {
+  need_cmd nvidia-smi
+
+  log "checking host NVIDIA driver and Docker GPU runtime"
+  local driver_version
+  driver_version="$(nvidia-smi --query-gpu=driver_version --format=csv,noheader 2>/dev/null | sed -n '1p')"
+  [ -n "${driver_version}" ] || die "nvidia-smi did not report an NVIDIA driver. Fix the host NVIDIA driver first."
+
+  if [ "$(printf '%s\n%s\n' "${minimum_nvidia_driver}" "${driver_version}" | sort -V | head -n 1)" != "${minimum_nvidia_driver}" ]; then
+    die "NVIDIA driver ${driver_version} is older than Resolve ${supported_resolve_version}'s minimum ${minimum_nvidia_driver}."
+  fi
+
+  if ! docker info --format '{{json .Runtimes}}' | grep -q '"nvidia"'; then
+    die "Docker's NVIDIA runtime is not configured. Install nvidia-container-toolkit, run 'sudo nvidia-ctk runtime configure --runtime=docker', restart Docker, and rerun setup."
+  fi
+
+  nvidia-smi --query-gpu=name,driver_version --format=csv,noheader >&2
 }
 
 write_resolve_install_marker() {
@@ -452,9 +538,19 @@ patch_resolve_glib_libs() {
 
 create_container() {
   if docker container inspect "${container}" >/dev/null 2>&1; then
-    local current_shm
+    local configured_backend current_shm
     current_shm="$(docker inspect -f '{{.HostConfig.ShmSize}}' "${container}" 2>/dev/null || true)"
+    configured_backend="$(docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "${container}" 2>/dev/null | sed -n 's/^RESOLVE_GPU_BACKEND=//p' | tail -n 1)"
     log "container already exists: ${container}"
+    if [ -n "${configured_backend}" ] && [ "${configured_backend}" != "${gpu_backend}" ]; then
+      die "container ${container} uses GPU backend ${configured_backend}, but ${gpu_backend} was selected. Remove and recreate the container."
+    fi
+    if [ -z "${configured_backend}" ]; then
+      if [ "${gpu_backend}" = "nvidia" ]; then
+        die "existing container ${container} predates NVIDIA backend tracking. Remove and recreate the container."
+      fi
+      log "warning: existing container predates GPU backend tracking; treating it as AMD"
+    fi
     if [[ "${current_shm}" =~ ^[0-9]+$ ]]; then
       log "container shared memory: ${current_shm} bytes"
       if [ "${current_shm}" -lt "${recommended_shm_bytes}" ]; then
@@ -468,14 +564,22 @@ create_container() {
 
   local render_gid video_gid flags
   local -a create_args
-  render_gid="$(group_gid render)"
-  [ -n "${render_gid}" ] || die "host group 'render' does not exist"
-  video_gid="$(group_gid video || true)"
+  flags="--env RESOLVE_GPU_BACKEND=${gpu_backend} --shm-size=${resolve_shm_size} --security-opt seccomp=unconfined --ulimit memlock=-1:-1 --ulimit nofile=1048576:1048576"
 
-  flags="--device /dev/kfd --device /dev/dri --group-add ${render_gid} --shm-size=${resolve_shm_size} --security-opt seccomp=unconfined --ulimit memlock=-1:-1 --ulimit nofile=1048576:1048576"
-  if [ -n "${video_gid}" ] && [ "${video_gid}" != "${render_gid}" ]; then
-    flags="${flags} --group-add ${video_gid}"
-  fi
+  case "${gpu_backend}" in
+    amd)
+      render_gid="$(group_gid render)"
+      [ -n "${render_gid}" ] || die "host group 'render' does not exist"
+      video_gid="$(group_gid video || true)"
+      flags="${flags} --device /dev/kfd --device /dev/dri --group-add ${render_gid}"
+      if [ -n "${video_gid}" ] && [ "${video_gid}" != "${render_gid}" ]; then
+        flags="${flags} --group-add ${video_gid}"
+      fi
+      ;;
+    nvidia)
+      flags="${flags} --gpus all --env NVIDIA_VISIBLE_DEVICES=all --env NVIDIA_DRIVER_CAPABILITIES=compute,graphics,utility,video,display"
+      ;;
+  esac
 
   create_args=(
     --image "${image}"
@@ -488,7 +592,7 @@ create_container() {
     log "mounting Resolve cache ${resolve_cache_dir} at ${resolve_cache_mount}"
   fi
 
-  log "creating Docker-backed Distrobox '${container}' from ${image} with /dev/shm=${resolve_shm_size}"
+  log "creating Docker-backed Distrobox '${container}' from ${image} with ${gpu_backend} GPU support and /dev/shm=${resolve_shm_size}"
   if ! DBX_CONTAINER_MANAGER=docker distrobox create \
     "${create_args[@]}"; then
     docker container inspect "${container}" >/dev/null 2>&1 || die "Distrobox create failed"
@@ -513,13 +617,19 @@ install_container_packages() {
 }
 
 configure_container() {
-  local host_opencl="$1"
-  local container_opencl="/run/host${host_opencl}"
+  local selected_backend="$1"
+  local host_opencl="${2:-}"
+  local container_opencl=""
   local container_resolve="/run/host${resolve_dir}"
 
-  log "configuring /opt/resolve symlink, AMD OpenCL ICD, and ALSA defaults"
+  if [ "${selected_backend}" = "amd" ]; then
+    container_opencl="/run/host${host_opencl}"
+  fi
+
+  log "configuring /opt/resolve symlink, ${selected_backend} GPU runtime, and ALSA defaults"
   docker exec -u root \
     -e HOST_USER="${container_user}" \
+    -e GPU_BACKEND="${selected_backend}" \
     -e CONTAINER_OPENCL="${container_opencl}" \
     -e CONTAINER_RESOLVE="${container_resolve}" \
     "${container}" bash -lc '
@@ -530,7 +640,16 @@ configure_container() {
       fi
       ln -sfn "${CONTAINER_RESOLVE}" /opt/resolve
       mkdir -p /etc/OpenCL/vendors
-      printf "%s\n" "${CONTAINER_OPENCL}" > /etc/OpenCL/vendors/amdocl64-host.icd
+      case "${GPU_BACKEND}" in
+        amd)
+          printf "%s\n" "${CONTAINER_OPENCL}" > /etc/OpenCL/vendors/amdocl64-host.icd
+          rm -f /etc/OpenCL/vendors/nvidia-host.icd
+          ;;
+        nvidia)
+          printf "%s\n" "libnvidia-opencl.so.1" > /etc/OpenCL/vendors/nvidia-host.icd
+          rm -f /etc/OpenCL/vendors/amdocl64-host.icd
+          ;;
+      esac
       rm -f "/var/tmp/.${HOST_USER}.passwd.initialize"
     '
 
@@ -546,29 +665,38 @@ install_launcher_files() {
   log "installing launcher to ${launcher_path}"
   install -D -m 0755 "${repo_dir}/bin/launch-resolve.sh" "${launcher_path}"
   mkdir -p "$(dirname "${desktop_path}")"
-  sed "s|@LAUNCHER@|${launcher_path}|g" "${template}" > "${desktop_path}"
+  sed \
+    -e "s|@LAUNCHER@|${launcher_path}|g" \
+    -e "s|@GPU_BACKEND@|${gpu_backend}|g" \
+    -e "s|@APP_NAME@|${desktop_name}|g" \
+    "${template}" > "${desktop_path}"
   chmod 0644 "${desktop_path}"
   update-desktop-database "${HOME}/.local/share/applications" >/dev/null 2>&1 || true
 }
 
 verify_container() {
-  log "verifying Resolve dependencies and AMD OpenCL device"
-  docker exec -u "${container_user}" "${container}" bash -lc '
+  log "verifying Resolve dependencies and ${gpu_backend} GPU device"
+  docker exec -u "${container_user}" -e GPU_BACKEND="${gpu_backend}" "${container}" bash -lc '
     set -e
-    test -r /dev/kfd
-    readable_render_node=0
-    for node in /dev/dri/renderD*; do
-      [ -e "${node}" ] || continue
-      if [ -r "${node}" ]; then
-        readable_render_node=1
-        break
-      fi
-    done
-    [ "${readable_render_node}" -eq 1 ] || {
-      echo "no readable /dev/dri/renderD* node found" >&2
-      ls -ln /dev/dri 2>/dev/null || true
-      exit 1
-    }
+    if [ "${GPU_BACKEND}" = "amd" ]; then
+      test -r /dev/kfd
+      readable_render_node=0
+      for node in /dev/dri/renderD*; do
+        [ -e "${node}" ] || continue
+        if [ -r "${node}" ]; then
+          readable_render_node=1
+          break
+        fi
+      done
+      [ "${readable_render_node}" -eq 1 ] || {
+        echo "no readable /dev/dri/renderD* node found" >&2
+        ls -ln /dev/dri 2>/dev/null || true
+        exit 1
+      }
+    else
+      nvidia-smi --query-gpu=name,driver_version --format=csv,noheader
+      ldconfig -p | grep -q "libcuda.so.1"
+    fi
     if ldd /opt/resolve/bin/resolve 2>&1 | grep -q "not found"; then
       ldd /opt/resolve/bin/resolve 2>&1 | grep "not found"
       exit 1
@@ -576,14 +704,15 @@ verify_container() {
     clinfo_output="$(clinfo)"
     printf "%s\n" "${clinfo_output}" | awk '"'"'
       function flush_device() {
-        if (device_vendor_amd && device_gpu) {
+        if (device_vendor_match && device_gpu) {
           found = 1
         }
-        device_vendor_amd = 0
+        device_vendor_match = 0
         device_gpu = 0
       }
       /^[[:space:]]*Device Name/ { flush_device() }
-      /Device Vendor/ && ($0 ~ /AMD|Advanced Micro Devices/) { device_vendor_amd = 1 }
+      /Device Vendor/ && ENVIRON["GPU_BACKEND"] == "amd" && ($0 ~ /AMD|Advanced Micro Devices/) { device_vendor_match = 1 }
+      /Device Vendor/ && ENVIRON["GPU_BACKEND"] == "nvidia" && ($0 ~ /NVIDIA/) { device_vendor_match = 1 }
       /Device Type/ && ($0 ~ /GPU/) { device_gpu = 1 }
       END { flush_device(); exit !found }
     '"'"'
@@ -600,24 +729,37 @@ need_cmd docker
 need_cmd distrobox
 need_cmd getent
 need_cmd ldconfig
-need_cmd clinfo
-
-[ -e /dev/kfd ] || die "/dev/kfd is missing. ROCm/HSA is not available on this host."
-[ -d /dev/dri ] || die "/dev/dri is missing."
 
 docker info >/dev/null 2>&1 || die "Docker is not usable by this user. Install Docker and add the user to the docker group, then log out/in."
 
-check_host_amd_opencl
+select_gpu_backend
+configure_gpu_defaults
+
+case "${gpu_backend}" in
+  amd)
+    need_cmd clinfo
+    [ -e /dev/kfd ] || die "/dev/kfd is missing. ROCm/HSA is not available on this host."
+    [ -d /dev/dri ] || die "/dev/dri is missing."
+    check_host_amd_opencl
+    ;;
+  nvidia)
+    check_host_nvidia
+    ;;
+esac
+
 ensure_resolve_installed
 
-host_opencl="$(resolve_amd_opencl_lib)"
-log "host AMD OpenCL library: ${host_opencl}"
+host_opencl=""
+if [ "${gpu_backend}" = "amd" ]; then
+  host_opencl="$(resolve_amd_opencl_lib)"
+  log "host AMD OpenCL library: ${host_opencl}"
+fi
 
 patch_resolve_glib_libs
 create_container
 initialize_container
 install_container_packages
-configure_container "${host_opencl}"
+configure_container "${gpu_backend}" "${host_opencl}"
 install_launcher_files
 verify_container
 
@@ -627,6 +769,7 @@ cat <<EOF
 Resolve Docker setup complete.
 
 Version:       ${resolve_product_name} ${resolve_version} build ${resolve_build}
+GPU backend:   ${gpu_backend}
 Resolve path:  ${resolve_dir}
 Resolve HOME:  ${resolve_home}
 Container:     ${container}

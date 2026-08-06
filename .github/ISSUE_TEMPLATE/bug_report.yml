@@ -1,0 +1,100 @@
+name: Bug report
+description: Report a setup, GPU, audio, launch, or verification problem
+title: "[Bug]: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for helping improve DaVinci Resolve Container. Search existing issues first and remove license keys, usernames, media names, and private paths from logs.
+  - type: dropdown
+    id: stage
+    attributes:
+      label: Failure stage
+      options:
+        - Setup
+        - Verification
+        - Launch
+        - Editing or playback
+        - Rendering
+        - Audio
+        - Project database
+        - Other
+    validations:
+      required: true
+  - type: dropdown
+    id: edition
+    attributes:
+      label: Resolve edition
+      options:
+        - Studio
+        - Free
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Resolve version
+      placeholder: 21.0.4 build 5
+    validations:
+      required: true
+  - type: dropdown
+    id: gpu_backend
+    attributes:
+      label: GPU backend
+      options:
+        - AMD ROCm/OpenCL
+        - NVIDIA CUDA/OpenCL
+    validations:
+      required: true
+  - type: input
+    id: gpu
+    attributes:
+      label: GPU model and driver
+      placeholder: Radeon RX 7900 XT with ROCm 7.x, or RTX 4070 with driver 580.x
+    validations:
+      required: true
+  - type: input
+    id: host
+    attributes:
+      label: Host distribution and desktop session
+      placeholder: Ubuntu 24.04, KDE Plasma, X11
+    validations:
+      required: true
+  - type: input
+    id: containers
+    attributes:
+      label: Docker and Distrobox versions
+      placeholder: Docker 28.x, Distrobox 1.8.x
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: Include the exact commands and the point where behavior diverged.
+    validations:
+      required: true
+  - type: textarea
+    id: verifier
+    attributes:
+      label: Verifier output
+      description: Paste output from scripts/verify-resolve.sh, with private information removed.
+      render: shell
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: Add relevant logs, screenshots, or whether this worked before an update.
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checklist
+      options:
+        - label: I searched existing issues for this error and GPU model.
+          required: true
+        - label: I removed license keys and private information from the report.
+          required: true

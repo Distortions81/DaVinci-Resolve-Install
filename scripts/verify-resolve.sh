@@ -1,10 +1,51 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-container="${RESOLVE_CONTAINER:-davincibox-docker}"
+container="${RESOLVE_CONTAINER:-}"
 container_user="${RESOLVE_USER:-$(id -un)}"
 uid="$(id -u)"
-resolve_home="${RESOLVE_HOME:-${HOME}/.local/share/davinci-resolve-21-box-home}"
+resolve_home="${RESOLVE_HOME:-}"
+gpu_backend="${RESOLVE_GPU:-auto}"
+
+host_has_amd_opencl() {
+  command -v clinfo >/dev/null 2>&1 || return 1
+  clinfo 2>/dev/null | awk '
+    function flush_device() {
+      if (device_vendor_amd && device_gpu) found = 1
+      device_vendor_amd = 0
+      device_gpu = 0
+    }
+    /^[[:space:]]*Device Name/ { flush_device() }
+    /Device Vendor/ && ($0 ~ /AMD|Advanced Micro Devices/) { device_vendor_amd = 1 }
+    /Device Type/ && ($0 ~ /GPU/) { device_gpu = 1 }
+    END { flush_device(); exit !found }
+  '
+}
+
+case "${gpu_backend,,}" in
+  auto)
+    if host_has_amd_opencl; then
+      gpu_backend="amd"
+    elif command -v nvidia-smi >/dev/null 2>&1 && nvidia-smi -L >/dev/null 2>&1; then
+      gpu_backend="nvidia"
+    else
+      echo "Could not auto-detect an AMD or NVIDIA GPU." >&2
+      exit 1
+    fi
+    ;;
+  amd|rocm|opencl) gpu_backend="amd" ;;
+  nvidia|cuda) gpu_backend="nvidia" ;;
+  *) echo "Invalid RESOLVE_GPU value: ${gpu_backend}. Use auto, amd, or nvidia." >&2; exit 1 ;;
+esac
+
+if [ "${gpu_backend}" = "nvidia" ]; then
+  container="${container:-davincibox-nvidia-docker}"
+  resolve_home="${resolve_home:-${HOME}/.local/share/davinci-resolve-21-nvidia-box-home}"
+else
+  container="${container:-davincibox-docker}"
+  resolve_home="${resolve_home:-${HOME}/.local/share/davinci-resolve-21-box-home}"
+fi
+
 resolve_xdg_config_home="${RESOLVE_XDG_CONFIG_HOME:-${resolve_home}/.config}"
 resolve_xdg_data_home="${RESOLVE_XDG_DATA_HOME:-${resolve_home}/.local/share}"
 resolve_xdg_cache_home="${RESOLVE_XDG_CACHE_HOME:-${resolve_home}/.cache}"
@@ -25,11 +66,18 @@ if ! docker container inspect "${container}" >/dev/null 2>&1; then
   exit 1
 fi
 
+configured_backend="$(docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "${container}" | sed -n 's/^RESOLVE_GPU_BACKEND=//p' | tail -n 1)"
+if [ -n "${configured_backend}" ] && [ "${configured_backend}" != "${gpu_backend}" ]; then
+  echo "Container '${container}' uses GPU backend ${configured_backend}, but ${gpu_backend} was selected." >&2
+  exit 1
+fi
+
 if [ "$(docker inspect -f '{{.State.Running}}' "${container}")" != "true" ]; then
   docker start "${container}" >/dev/null
 fi
 
 echo "Container:"
+echo "  gpu_backend=${gpu_backend}"
 container_ipc="$(docker inspect -f '{{.HostConfig.IpcMode}}' "${container}")"
 requested_shm="$(docker inspect -f '{{.HostConfig.ShmSize}}' "${container}")"
 actual_shm="$(docker exec "${container}" df -B1 --output=size /dev/shm | awk 'NR == 2 { print $1 }')"
@@ -64,8 +112,12 @@ if [ "${XDG_SESSION_TYPE:-}" != "x11" ]; then
 fi
 
 echo
-echo "Host GPU groups:"
-getent group render video || true
+echo "Host GPU:"
+if [ "${gpu_backend}" = "amd" ]; then
+  getent group render video || true
+else
+  nvidia-smi --query-gpu=name,driver_version --format=csv,noheader || true
+fi
 
 echo
 echo "Resolve isolated state:"
@@ -110,6 +162,7 @@ else
   echo "  pulse client=missing"
 fi
 docker exec -u "${container_user}" \
+  -e GPU_BACKEND="${gpu_backend}" \
   -e HOME="${resolve_home}" \
   -e XDG_CONFIG_HOME="${resolve_xdg_config_home}" \
   -e XDG_DATA_HOME="${resolve_xdg_data_home}" \
@@ -161,6 +214,7 @@ fi
 echo
 echo "Device permissions:"
 docker exec -u "${container_user}" \
+  -e GPU_BACKEND="${gpu_backend}" \
   -e HOME="${resolve_home}" \
   -e XDG_CONFIG_HOME="${resolve_xdg_config_home}" \
   -e XDG_DATA_HOME="${resolve_xdg_data_home}" \
@@ -171,23 +225,28 @@ docker exec -u "${container_user}" \
   printf "XDG_CONFIG_HOME=%s\n" "$XDG_CONFIG_HOME"
   printf "XDG_DATA_HOME=%s\n" "$XDG_DATA_HOME"
   printf "XDG_CACHE_HOME=%s\n" "$XDG_CACHE_HOME"
-  if ls /dev/dri/renderD* >/dev/null 2>&1; then
-    ls -ln /dev/kfd /dev/dri/renderD*
+  if [ "${GPU_BACKEND}" = "nvidia" ]; then
+    nvidia-smi --query-gpu=name,driver_version --format=csv,noheader
+    ldconfig -p | grep "libcuda.so.1" | sed -n "1p"
   else
-    ls -ln /dev/kfd /dev/dri 2>/dev/null || true
-  fi
-  test -r /dev/kfd && echo "kfd: readable" || echo "kfd: not readable"
-  readable_render_node=0
-  for node in /dev/dri/renderD*; do
-    [ -e "${node}" ] || continue
-    if [ -r "${node}" ]; then
-      readable_render_node=1
-      echo "$(basename "${node}"): readable"
+    if ls /dev/dri/renderD* >/dev/null 2>&1; then
+      ls -ln /dev/kfd /dev/dri/renderD*
     else
-      echo "$(basename "${node}"): not readable"
+      ls -ln /dev/kfd /dev/dri 2>/dev/null || true
     fi
-  done
-  [ "${readable_render_node}" -eq 1 ] || echo "render node: no readable /dev/dri/renderD* node found"
+    test -r /dev/kfd && echo "kfd: readable" || echo "kfd: not readable"
+    readable_render_node=0
+    for node in /dev/dri/renderD*; do
+      [ -e "${node}" ] || continue
+      if [ -r "${node}" ]; then
+        readable_render_node=1
+        echo "$(basename "${node}"): readable"
+      else
+        echo "$(basename "${node}"): not readable"
+      fi
+    done
+    [ "${readable_render_node}" -eq 1 ] || echo "render node: no readable /dev/dri/renderD* node found"
+  fi
 '
 
 echo
@@ -198,7 +257,7 @@ docker exec -u "${container_user}" "${container}" bash -lc '
 
 echo
 echo "OpenCL:"
-docker exec -u "${container_user}" "${container}" bash -lc '
+docker exec -u "${container_user}" -e GPU_BACKEND="${gpu_backend}" "${container}" bash -lc '
   clinfo_output="$(clinfo 2>&1)" || {
     printf "%s\n" "${clinfo_output}"
     exit 1
@@ -206,18 +265,19 @@ docker exec -u "${container_user}" "${container}" bash -lc '
   printf "%s\n" "${clinfo_output}" | grep -E "Number of platforms|Platform Name|Number of devices|Device Name|Board Name|Device Vendor|Device Type|Driver Version" | sed -n "1,60p" || true
   printf "%s\n" "${clinfo_output}" | awk '"'"'
     function flush_device() {
-      if (device_vendor_amd && device_gpu) {
+      if (device_vendor_match && device_gpu) {
         found = 1
       }
-      device_vendor_amd = 0
+      device_vendor_match = 0
       device_gpu = 0
     }
     /^[[:space:]]*Device Name/ { flush_device() }
-    /Device Vendor/ && ($0 ~ /AMD|Advanced Micro Devices/) { device_vendor_amd = 1 }
+    /Device Vendor/ && ENVIRON["GPU_BACKEND"] == "amd" && ($0 ~ /AMD|Advanced Micro Devices/) { device_vendor_match = 1 }
+    /Device Vendor/ && ENVIRON["GPU_BACKEND"] == "nvidia" && ($0 ~ /NVIDIA/) { device_vendor_match = 1 }
     /Device Type/ && ($0 ~ /GPU/) { device_gpu = 1 }
     END { flush_device(); exit !found }
   '"'"' || {
-    echo "OpenCL check failed: no AMD GPU device was reported."
+    echo "OpenCL check failed: no ${GPU_BACKEND} GPU device was reported."
     exit 1
   }
 '
@@ -234,9 +294,9 @@ docker exec -u "${container_user}" "${container}" bash -lc '
 '
 
 echo
-echo "Recent AMD/GPU kernel messages:"
+echo "Recent ${gpu_backend}/GPU kernel messages:"
 if command -v journalctl >/dev/null 2>&1; then
-  gpu_log="$(journalctl -k -b --no-pager 2>/dev/null | grep -Ei "amdgpu|kfd|gpu reset|ring|vm fault|oom|segfault" | tail -n 80 || true)"
+  gpu_log="$(journalctl -k -b --no-pager 2>/dev/null | grep -Ei "amdgpu|kfd|nvidia|nvrm|xid|gpu reset|ring|vm fault|oom|segfault" | tail -n 80 || true)"
   if [ -n "${gpu_log}" ]; then
     printf "%s\n" "${gpu_log}"
   else

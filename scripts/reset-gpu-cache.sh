@@ -1,7 +1,29 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-resolve_home="${RESOLVE_HOME:-${HOME}/.local/share/davinci-resolve-21-box-home}"
+gpu_backend="${RESOLVE_GPU:-auto}"
+case "${gpu_backend,,}" in
+  nvidia|cuda) gpu_backend="nvidia" ;;
+  amd|rocm|opencl) gpu_backend="amd" ;;
+  auto)
+    if [ -d "${HOME}/.local/share/davinci-resolve-21-box-home" ]; then
+      gpu_backend="amd"
+    elif [ -d "${HOME}/.local/share/davinci-resolve-21-nvidia-box-home" ]; then
+      gpu_backend="nvidia"
+    elif command -v nvidia-smi >/dev/null 2>&1 && nvidia-smi -L >/dev/null 2>&1; then
+      gpu_backend="nvidia"
+    else
+      gpu_backend="amd"
+    fi
+    ;;
+  *) printf 'reset-gpu-cache: ERROR: invalid RESOLVE_GPU value: %s\n' "${gpu_backend}" >&2; exit 1 ;;
+esac
+
+if [ "${gpu_backend}" = "nvidia" ]; then
+  resolve_home="${RESOLVE_HOME:-${HOME}/.local/share/davinci-resolve-21-nvidia-box-home}"
+else
+  resolve_home="${RESOLVE_HOME:-${HOME}/.local/share/davinci-resolve-21-box-home}"
+fi
 resolve_xdg_data_home="${RESOLVE_XDG_DATA_HOME:-${resolve_home}/.local/share}"
 
 die() {

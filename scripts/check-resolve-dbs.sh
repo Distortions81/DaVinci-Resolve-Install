@@ -1,9 +1,32 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-container="${RESOLVE_CONTAINER:-davincibox-docker}"
+gpu_backend="${RESOLVE_GPU:-auto}"
+case "${gpu_backend,,}" in
+  nvidia|cuda) gpu_backend="nvidia" ;;
+  amd|rocm|opencl) gpu_backend="amd" ;;
+  auto)
+    if docker container inspect davincibox-docker >/dev/null 2>&1; then
+      gpu_backend="amd"
+    elif docker container inspect davincibox-nvidia-docker >/dev/null 2>&1; then
+      gpu_backend="nvidia"
+    elif command -v nvidia-smi >/dev/null 2>&1 && nvidia-smi -L >/dev/null 2>&1; then
+      gpu_backend="nvidia"
+    else
+      gpu_backend="amd"
+    fi
+    ;;
+  *) echo "Invalid RESOLVE_GPU value: ${gpu_backend}. Use auto, amd, or nvidia." >&2; exit 1 ;;
+esac
+
+if [ "${gpu_backend}" = "nvidia" ]; then
+  container="${RESOLVE_CONTAINER:-davincibox-nvidia-docker}"
+  resolve_home="${RESOLVE_HOME:-${HOME}/.local/share/davinci-resolve-21-nvidia-box-home}"
+else
+  container="${RESOLVE_CONTAINER:-davincibox-docker}"
+  resolve_home="${RESOLVE_HOME:-${HOME}/.local/share/davinci-resolve-21-box-home}"
+fi
 container_user="${RESOLVE_USER:-$(id -un)}"
-resolve_home="${RESOLVE_HOME:-${HOME}/.local/share/davinci-resolve-21-box-home}"
 resolve_xdg_config_home="${RESOLVE_XDG_CONFIG_HOME:-${resolve_home}/.config}"
 resolve_xdg_data_home="${RESOLVE_XDG_DATA_HOME:-${resolve_home}/.local/share}"
 resolve_xdg_cache_home="${RESOLVE_XDG_CACHE_HOME:-${resolve_home}/.cache}"
